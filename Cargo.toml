@@ -5,3 +5,7 @@ members = [
     "core",
     "trace",
 ]
+
+exclude = [
+    "examples/nrf52840"
+]

@@ -1,0 +1,15 @@
+[package]
+name = "nrf52840"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cortex-m = {version = "0.7.3", features = ["inline-asm"]}
+cortex-m-rt = "0.7.0"
+nrf52840-hal = { version = "0.14.0", features = ["rt"] }
+rtt-target = { version = "0.3.1", features = ["cortex-m"] }
+embedded-hal = "0.2.6"
+
+stackdump-capture = { path = "../../capture", features = ["cortex-m-fpu"] }

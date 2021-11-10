@@ -6,3 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+stackdump-core = { path = "../core", default-features = false }
+
+[features]
+cortex-m = []
+cortex-m-fpu = ["cortex-m"]
