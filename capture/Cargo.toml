@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 stackdump-core = { path = "../core", default-features = false }
+arrayvec = { version = "0.7.2", default-features = false }
+serde = { version = "1.0.130", default-features = false, features = ["derive"] }
 
 [features]
 cortex-m = []

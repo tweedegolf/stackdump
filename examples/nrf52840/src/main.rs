@@ -1,25 +1,35 @@
 #![no_main]
 #![no_std]
 
+use core::mem::MaybeUninit;
 use cortex_m::peripheral::NVIC;
-use rtt_target::{rprintln, rtt_init_print};
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
-use stackdump_capture::stackdump_core::Registers;
+use rtt_target::{rprintln, rtt_init_print};
+use stackdump_capture::cortex_m::CortexMFpuTarget;
+use stackdump_capture::stackdump_core::Stackdump;
+
+#[link_section = ".uninit"]
+static mut STACKDUMP_FLAG: MaybeUninit<u32> = MaybeUninit::uninit();
+#[link_section = ".uninit"]
+static mut STACKDUMP: MaybeUninit<Stackdump<CortexMFpuTarget, { 128 * 1024 }>> =
+    MaybeUninit::uninit();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let _cp = cortex_m::Peripherals::take().unwrap();
     let dp = nrf52840_hal::pac::Peripherals::take().unwrap();
 
-    rtt_init_print!();
-    rprintln!("Generating interrupt");
+    rtt_init_print!(BlockIfFull);
+    rprintln!("Generating interrupts");
 
-    unsafe { NVIC::unmask(nrf52840_hal::pac::Interrupt::TIMER0); }
+    unsafe {
+        NVIC::unmask(nrf52840_hal::pac::Interrupt::TIMER0);
+    }
 
     let mut timer = nrf52840_hal::Timer::periodic(dp.TIMER0);
     timer.enable_interrupt();
-    timer.start(1000000u32);
+    timer.start(100000u32);
 
     do_loop();
 }
@@ -44,9 +54,18 @@ fn TIMER0() {
     // Stop the interrupt
     timer.events_compare[0].write(|w| w);
 
-    let mut regs = stackdump_capture::CortexMRegisters::default();
-    regs.capture();
-    rprintln!("Registers: {:02X?}", regs);
+    unsafe {
+        let dump = if STACKDUMP_FLAG.assume_init() != 0xDEADBEEF {
+            STACKDUMP_FLAG.write(0xDEADBEEF);
+            // Not yet initialized
+            STACKDUMP.write(Stackdump::new())
+        } else {
+            STACKDUMP.assume_init_mut()
+        };
+
+        dump.capture();
+        rprintln!("Dump: {:02X?}", dump);
+    }
 
     cortex_m::asm::bkpt();
 }

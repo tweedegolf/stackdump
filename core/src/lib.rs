@@ -1,15 +1,24 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use arrayvec::ArrayVec;
+use core::fmt::Debug;
 use core::marker::PhantomData;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-pub struct Stackdump<T: Target, const STACK_SIZE: usize> {
-    registers: T::Registers,
-    stack: ArrayVec<u8, STACK_SIZE>,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Stackdump<T, const STACK_SIZE: usize>
+where
+    T: Target,
+{
+    pub registers: T::Registers,
+    pub stack: ArrayVec<u8, STACK_SIZE>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: Target, const STACK_SIZE: usize> Stackdump<T, STACK_SIZE> {
+impl<T, const STACK_SIZE: usize> Stackdump<T, STACK_SIZE>
+where
+    T: Target,
+{
     pub fn new() -> Self {
         Self {
             registers: Default::default(),
@@ -17,12 +26,15 @@ impl<T: Target, const STACK_SIZE: usize> Stackdump<T, STACK_SIZE> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn capture(&mut self) {
+        T::capture(self);
+    }
 }
 
-pub trait Target {
-    type Registers: Registers;
-}
-
-pub trait Registers: Default {
-    fn capture(&mut self);
+pub trait Target: Debug + DeserializeOwned + Serialize {
+    type Registers: Default + Debug + DeserializeOwned + Serialize;
+    fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>)
+    where
+        Self: Sized;
 }
