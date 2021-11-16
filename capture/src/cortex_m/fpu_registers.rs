@@ -1,26 +1,17 @@
-use super::registers::CortexMRegisters;
-use core::ops::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CortexMFpuRegisters {
-    registers: CortexMRegisters,
-    fpu_registers: [u32; 32],
-}
+pub struct CortexMFpuRegisters([u32; 32]);
 
 impl Default for CortexMFpuRegisters {
     fn default() -> Self {
-        Self {
-            fpu_registers: [0; 32],
-            registers: Default::default(),
-        }
+        Self ([0; 32])
     }
 }
 
 impl CortexMFpuRegisters {
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
-        self.registers.capture();
         unsafe {
             asm!(
                 "vstr s0, [{0}, #0]",
@@ -55,30 +46,16 @@ impl CortexMFpuRegisters {
                 "vstr s29, [{0}, #116]",
                 "vstr s30, [{0}, #120]",
                 "vstr s31, [{0}, #124]",
-                in(reg) self.fpu_registers.as_ptr(),
+                in(reg) self.0.as_ptr(),
             );
         }
     }
 
     pub fn fpu_register(&self, index: usize) -> &u32 {
-        &self.fpu_registers[index]
+        &self.0[index]
     }
 
     pub fn fpu_register_mut(&mut self, index: usize) -> &mut u32 {
-        &mut self.fpu_registers[index]
-    }
-}
-
-impl Deref for CortexMFpuRegisters {
-    type Target = CortexMRegisters;
-
-    fn deref(&self) -> &Self::Target {
-        &self.registers
-    }
-}
-
-impl DerefMut for CortexMFpuRegisters {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.registers
+        &mut self.0[index]
     }
 }

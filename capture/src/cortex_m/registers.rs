@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct CortexMRegisters {
-    values: [u32; 16],
-}
+pub struct CortexMBaseRegisters([u32; 16]);
 
-impl core::fmt::Debug for CortexMRegisters {
+impl core::fmt::Debug for CortexMBaseRegisters {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("CortexMRegisters")
             .field("r0", self.register(0))
@@ -28,11 +26,10 @@ impl core::fmt::Debug for CortexMRegisters {
     }
 }
 
-impl CortexMRegisters {
+impl CortexMBaseRegisters {
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
         unsafe {
-            let mut pc;
             asm!(
                 "str r0, [{0}, #0]",
                 "str r1, [{0}, #4]",
@@ -49,49 +46,48 @@ impl CortexMRegisters {
                 "str r12, [{0}, #48]",
                 "str sp, [{0}, #52]",
                 "str lr, [{0}, #56]",
-                "mov {1}, pc",
-                in(reg) self.values.as_ptr(),
-                out(reg) pc,
+                "mov {1}, pc", // We can't use the str instruction with the PC register
+                in(reg) self.0.as_ptr(),
+                lateout(reg) *self.pc_mut(),
             );
-            *self.pc_mut() = pc;
         }
     }
 
     pub fn register(&self, index: usize) -> &u32 {
-        &self.values[index]
+        &self.0[index]
     }
 
     pub fn sp(&self) -> &u32 {
-        &self.values[13]
+        &self.0[13]
     }
 
     pub fn lr(&self) -> &u32 {
-        &self.values[14]
+        &self.0[14]
     }
 
     pub fn pc(&self) -> &u32 {
-        &self.values[15]
+        &self.0[15]
     }
 
     pub fn register_mut(&mut self, index: usize) -> &mut u32 {
-        &mut self.values[index]
+        &mut self.0[index]
     }
 
     pub fn sp_mut(&mut self) -> &mut u32 {
-        &mut self.values[13]
+        &mut self.0[13]
     }
 
     pub fn lr_mut(&mut self) -> &mut u32 {
-        &mut self.values[14]
+        &mut self.0[14]
     }
 
     pub fn pc_mut(&mut self) -> &mut u32 {
-        &mut self.values[15]
+        &mut self.0[15]
     }
 }
 
-impl Default for CortexMRegisters {
+impl Default for CortexMBaseRegisters {
     fn default() -> Self {
-        Self { values: [0; 16] }
+        Self([0; 16])
     }
 }
