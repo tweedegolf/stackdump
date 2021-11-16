@@ -19,7 +19,11 @@ impl Target for CortexMTarget {
     fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>) {
         target.registers.base.capture();
         if cfg!(feature = "cortex-m-fpu") {
-            target.registers.fpu.insert(fpu_registers::CortexMFpuRegisters::default()).capture();
+            target
+                .registers
+                .fpu
+                .insert(fpu_registers::CortexMFpuRegisters::default())
+                .capture();
         }
         unsafe {
             stack::capture_stack(*target.registers.base.sp(), &mut target.stack);

@@ -5,7 +5,7 @@ pub struct CortexMFpuRegisters([u32; 32]);
 
 impl Default for CortexMFpuRegisters {
     fn default() -> Self {
-        Self ([0; 32])
+        Self([0; 32])
     }
 }
 
