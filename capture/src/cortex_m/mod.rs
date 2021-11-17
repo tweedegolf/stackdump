@@ -1,32 +1,40 @@
 use serde::{Deserialize, Serialize};
-use stackdump_core::{Stackdump, Target};
+use stackdump_core::{RegisterContainer, Stackdump, Target};
 
 pub mod fpu_registers;
 pub mod registers;
+#[cfg(feature = "capture")]
 mod stack;
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct CortexMRegisters {
-    base: registers::CortexMBaseRegisters,
-    fpu: Option<fpu_registers::CortexMFpuRegisters>,
+    pub base: registers::CortexMBaseRegisters,
+    pub fpu: fpu_registers::CortexMFpuRegisters,
 }
+
+impl RegisterContainer for CortexMRegisters {}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CortexMTarget {}
 impl Target for CortexMTarget {
     type Registers = CortexMRegisters;
 
+    #[cfg(feature = "capture")]
     fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>) {
         target.registers.base.capture();
         if cfg!(feature = "cortex-m-fpu") {
             target
                 .registers
                 .fpu
-                .insert(fpu_registers::CortexMFpuRegisters::default())
                 .capture();
         }
         unsafe {
             stack::capture_stack(*target.registers.base.sp(), &mut target.stack);
         }
+    }
+
+    #[cfg(not(feature = "capture"))]
+    fn capture<const STACK_SIZE: usize>(_target: &mut Stackdump<Self, STACK_SIZE>) {
+        unimplemented!("Activate the 'capture' feature to have this functionality");
     }
 }

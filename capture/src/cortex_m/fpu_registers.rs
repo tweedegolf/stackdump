@@ -1,15 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CortexMFpuRegisters([u32; 32]);
+pub struct CortexMFpuRegisters {
+    registers: [u32; 32],
+    fpscr: u32,
+}
 
 impl Default for CortexMFpuRegisters {
     fn default() -> Self {
-        Self([0; 32])
+        Self {
+            registers: [0; 32],
+            fpscr: 0,
+        }
     }
 }
 
 impl CortexMFpuRegisters {
+    #[cfg(feature = "capture")]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
         unsafe {
@@ -46,16 +53,28 @@ impl CortexMFpuRegisters {
                 "vstr s29, [{0}, #116]",
                 "vstr s30, [{0}, #120]",
                 "vstr s31, [{0}, #124]",
-                in(reg) self.0.as_ptr(),
+                "vmrs {tmp}, fpscr",
+                "str {tmp}, [{1}]",
+                in(reg) self.registers.as_ptr(),
+                in(reg) &mut self.fpscr as *mut u32,
+                tmp = out(reg) _,
             );
         }
     }
 
     pub fn fpu_register(&self, index: usize) -> &u32 {
-        &self.0[index]
+        &self.registers[index]
     }
 
     pub fn fpu_register_mut(&mut self, index: usize) -> &mut u32 {
-        &mut self.0[index]
+        &mut self.registers[index]
+    }
+
+    pub fn fpscr(&self) -> &u32 {
+        &self.fpscr
+    }
+
+    pub fn fpscr_mut(&mut self) -> &mut u32 {
+        &mut self.fpscr
     }
 }

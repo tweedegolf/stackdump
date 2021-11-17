@@ -33,8 +33,10 @@ where
 }
 
 pub trait Target: Debug + DeserializeOwned + Serialize {
-    type Registers: Default + Debug + DeserializeOwned + Serialize;
+    type Registers: RegisterContainer;
     fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>)
     where
         Self: Sized;
 }
+
+pub trait RegisterContainer: Default + Debug + DeserializeOwned + Serialize + Clone {}

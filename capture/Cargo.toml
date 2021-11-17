@@ -9,7 +9,11 @@ edition = "2021"
 stackdump-core = { path = "../core", default-features = false }
 arrayvec = { version = "0.7.2", default-features = false }
 serde = { version = "1.0.130", default-features = false, features = ["derive"] }
+gimli = { version = "0.26.1", optional = true }
 
 [features]
 cortex-m = []
 cortex-m-fpu = ["cortex-m"]
+capture = []
+std = ["gimli", "stackdump-core/std"]
+default = ["capture"]

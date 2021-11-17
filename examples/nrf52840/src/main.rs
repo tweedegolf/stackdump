@@ -10,7 +10,7 @@ use stackdump_capture::cortex_m::CortexMTarget;
 use stackdump_capture::stackdump_core::Stackdump;
 
 #[link_section = ".uninit"]
-static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, { 128 * 1024 }>> = MaybeUninit::uninit();
+static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, { 32 * 1024 }>> = MaybeUninit::uninit();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -54,7 +54,15 @@ fn TIMER0() {
     unsafe {
         let dump = STACKDUMP.assume_init_mut();
         dump.capture();
-        rprintln!("Dump: {:02X?}", dump);
+
+        #[inline(never)]
+        fn write_dump<const STACK_SIZE: usize>(dump: &mut Stackdump<CortexMTarget, STACK_SIZE>) {
+            let mut buffer = [0; 80000];
+            let size = serde_json_core::to_slice(&dump, &mut buffer).unwrap();
+            rprintln!("{}", core::str::from_utf8(&buffer[..size]).unwrap());
+        }
+
+        write_dump(dump);
     }
 
     cortex_m::asm::bkpt();

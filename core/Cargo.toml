@@ -8,7 +8,8 @@ edition = "2021"
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false, features = ["serde"] }
 serde = { version = "1.0.130", default-features = false, features = ["derive"] }
+gimli = { version = "0.26.1", optional = true }
 
 [features]
-std = ["arrayvec/std"]
+std = ["arrayvec/std", "gimli"]
 default = ["std"]

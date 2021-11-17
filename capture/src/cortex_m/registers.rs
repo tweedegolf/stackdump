@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct CortexMBaseRegisters([u32; 16]);
+pub struct CortexMBaseRegisters([u32; 17]);
 
 impl core::fmt::Debug for CortexMBaseRegisters {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -27,6 +27,7 @@ impl core::fmt::Debug for CortexMBaseRegisters {
 }
 
 impl CortexMBaseRegisters {
+    #[cfg(feature = "capture")]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
         unsafe {
@@ -46,9 +47,12 @@ impl CortexMBaseRegisters {
                 "str r12, [{0}, #48]",
                 "str sp, [{0}, #52]",
                 "str lr, [{0}, #56]",
-                "mov {1}, pc", // We can't use the str instruction with the PC register
+                "mov {tmp}, pc", // We can't use the str instruction with the PC register directly, so store it in tmp
+                "str {tmp}, [{0}, #60]",
+                "mrs {tmp}, apsr", // We can't get the program status register normally, so store it in tmp
+                "str {tmp}, [{0}, #64]",
                 in(reg) self.0.as_ptr(),
-                lateout(reg) *self.pc_mut(),
+                tmp = out(reg) _,
             );
         }
     }
@@ -69,6 +73,10 @@ impl CortexMBaseRegisters {
         &self.0[15]
     }
 
+    pub fn psr(&self) -> &u32 {
+        &self.0[16]
+    }
+
     pub fn register_mut(&mut self, index: usize) -> &mut u32 {
         &mut self.0[index]
     }
@@ -84,10 +92,14 @@ impl CortexMBaseRegisters {
     pub fn pc_mut(&mut self) -> &mut u32 {
         &mut self.0[15]
     }
+
+    pub fn psr_mut(&mut self) -> &mut u32 {
+        &mut self.0[16]
+    }
 }
 
 impl Default for CortexMBaseRegisters {
     fn default() -> Self {
-        Self([0; 16])
+        Self([0; 17])
     }
 }
