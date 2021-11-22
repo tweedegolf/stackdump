@@ -63,11 +63,17 @@ impl CortexMFpuRegisters {
     }
 
     pub fn fpu_register(&self, index: usize) -> &u32 {
-        &self.registers[index]
+        match index {
+            32 => self.fpscr(),
+            index => &self.registers[index],
+        }
     }
 
     pub fn fpu_register_mut(&mut self, index: usize) -> &mut u32 {
-        &mut self.registers[index]
+        match index {
+            32 => self.fpscr_mut(),
+            index => &mut self.registers[index],
+        }
     }
 
     pub fn fpscr(&self) -> &u32 {

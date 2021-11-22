@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct CortexMBaseRegisters([u32; 17]);
 
 impl core::fmt::Debug for CortexMBaseRegisters {

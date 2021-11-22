@@ -214,10 +214,34 @@ where
             .contains(self.registers.base.pc())
         {
             // Yes, let's make that a frame as well
-            frames.push(Frame { function: Some("RESET".into()), file: None, line: None, column: None, frame_type: FrameType::Function })
+            frames.push(Frame {
+                function: Some("RESET".into()),
+                file: None,
+                line: None,
+                column: None,
+                frame_type: FrameType::Function,
+            })
         }
 
-        Ok(!self.is_last_frame())
+        if self.is_last_frame() {
+            Ok(false)
+        } else {
+            // Is our stack pointer in a weird place?
+            if (self.stack_reader)(*self.registers.base.sp()).is_none() {
+                frames.push(Frame {
+                    function: Some("Unknown".into()),
+                    file: None,
+                    line: None,
+                    column: None,
+                    frame_type: FrameType::Corrupted(
+                        format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", *self.registers.base.sp()),
+                    ),
+                });
+                Ok(false)
+            } else {
+                Ok(true)
+            }
+        }
     }
 
     fn apply_unwind_info(
@@ -332,6 +356,9 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
 
         // Keep looping until we've got the entire trace
         loop {
+            #[cfg(test)]
+            println!("{:02X?}", context.registers);
+
             context.find_current_frames(&mut frames)?;
             if !context.try_unwind(&mut frames)? {
                 break;
@@ -353,6 +380,26 @@ mod tests {
     fn example_dump() {
         let stackdump: Stackdump<CortexMTarget, 32768> = serde_json::from_slice(DUMP).unwrap();
         let frames = stackdump.trace(ELF).unwrap();
+        for (i, frame) in frames.iter().enumerate() {
+            println!("{}: {}", i, frame);
+        }
+    }
+
+    #[test]
+    fn timeout_dump() {
+        let stackdump: Stackdump<CortexMTarget, 32768> = TryFrom::try_from(
+            &include_bytes!(
+                "../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.dump"
+            )[..],
+        )
+        .unwrap();
+        let frames = stackdump
+            .trace(
+                &include_bytes!(
+            "../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.elf"
+        )[..],
+            )
+            .unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);
         }
