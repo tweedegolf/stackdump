@@ -2,8 +2,8 @@ pub mod cortex_m;
 
 use std::{error::Error, fmt::Display};
 
-pub use stackdump_core;
 pub use stackdump_capture;
+pub use stackdump_core;
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -16,7 +16,12 @@ pub struct Frame {
 
 impl Display for Frame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{} ({:?})", self.function.clone().unwrap_or_else(|| "UNKNOWN".into()), self.frame_type)?;
+        writeln!(
+            f,
+            "{} ({:?})",
+            self.function.clone().unwrap_or_else(|| "UNKNOWN".into()),
+            self.frame_type
+        )?;
         if let Some(file) = self.file.clone() {
             write!(f, "  at {}", file)?;
             if let Some(line) = self.line {
