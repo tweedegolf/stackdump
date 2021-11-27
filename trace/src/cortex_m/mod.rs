@@ -1,5 +1,4 @@
-use std::{error::Error, ops::Range};
-
+use crate::{Frame, FrameType, Trace};
 use addr2line::{
     object::{File, Object, ObjectSection, ObjectSymbol},
     Context,
@@ -10,8 +9,9 @@ use gimli::{
 };
 use stackdump_capture::cortex_m::{CortexMRegisters, CortexMTarget};
 use stackdump_core::Stackdump;
+use std::{error::Error, ops::Range};
 
-use crate::{Frame, FrameType, Trace};
+mod variables;
 
 struct UnwindingContext<'data, F>
 where
@@ -41,12 +41,12 @@ where
     ) -> Result<Self, Box<dyn Error>> {
         let addr2line_context = addr2line::Context::new(&elf).unwrap();
 
-        let mut debug_frame = addr2line::gimli::DebugFrame::new(
-            elf.section_by_name(".debug_frame")
-                .ok_or("Could not find .debug_frame section")?
-                .data()?,
-            LittleEndian,
-        );
+        let debug_info_sector_data = elf
+            .section_by_name(".debug_frame")
+            .ok_or("Could not find .debug_frame section")?
+            .data()?;
+        let mut debug_frame =
+            addr2line::gimli::DebugFrame::new(debug_info_sector_data, LittleEndian);
         debug_frame.set_address_size(std::mem::size_of::<u32>() as u8);
 
         let vector_table_section = elf
@@ -94,13 +94,48 @@ where
             .find_frames(*self.registers.base.pc() as u64)
             .unwrap();
 
+        // Get the debug compilation unit of the current register context
+        let unit = self
+            .addr2line_context
+            .find_dwarf_unit(*self.registers.base.pc() as u64)
+            .unwrap();
+
+        // Get the abbreviations of the unit
+        let abbreviations = self
+            .addr2line_context
+            .dwarf()
+            .abbreviations(&unit.header)
+            .unwrap();
+
         // Loop through the found frames and add them
         let mut added_frames = 0;
-        while let Some(context_frame) = context_frames.next()? {
+        while let Some(context_frame) = context_frames.next().unwrap() {
             let (file, line, column) = context_frame
                 .location
                 .map(|l| (l.file.map(|f| f.to_string()), l.line, l.column))
                 .unwrap_or_default();
+
+            let mut variables = Vec::new();
+
+            if let Some(die_offset) = context_frame.dw_die_offset {
+                let mut entries = match unit.header.entries_tree(&abbreviations, Some(die_offset)) {
+                    Ok(entries) => entries,
+                    Err(_) => {
+                        continue;
+                    }
+                };
+
+                if let Ok(entry_root) = entries.root() {
+                    variables::find_variables(
+                        &self.addr2line_context,
+                        unit,
+                        &abbreviations,
+                        &self.registers,
+                        entry_root,
+                        &mut variables,
+                    );
+                }
+            }
 
             frames.push(Frame {
                 function: context_frame
@@ -111,6 +146,7 @@ where
                 line,
                 column,
                 frame_type: FrameType::InlineFunction,
+                variables,
             });
 
             added_frames += 1;
@@ -138,7 +174,8 @@ where
                 frames.push(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
                 1. compile the Rust code with `debug = 1` or higher. This is configured in the `profile.{{release,bench}}` sections of Cargo.toml (`profile.{{dev,test}}` default to `debug = 2`)
                 2. use a recent version of the `cortex-m` crates (e.g. cortex-m 0.6.3 or newer). Check versions in Cargo.lock
-                3. if linking to C code, compile the C code with the `-g` flag", self.registers.base.pc())) });
+                3. if linking to C code, compile the C code with the `-g` flag", self.registers.base.pc())),
+                    variables: Vec::new(), });
                 return Ok(false);
             }
         };
@@ -153,6 +190,7 @@ where
                     line: None,
                     column: None,
                     frame_type: FrameType::Corrupted(e.to_string()),
+                    variables: Vec::new(),
                 });
                 return Ok(false);
             }
@@ -176,6 +214,7 @@ where
                 frame_type: FrameType::Corrupted(
                     "CFA did not change and LR and PC are equal".into(),
                 ),
+                variables: Vec::new(),
             });
             return Ok(false);
         }
@@ -220,6 +259,7 @@ where
                 line: None,
                 column: None,
                 frame_type: FrameType::Function,
+                variables: Vec::new(),
             })
         }
 
@@ -236,6 +276,7 @@ where
                     frame_type: FrameType::Corrupted(
                         format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", *self.registers.base.sp()),
                     ),
+                    variables: Vec::new(),
                 });
                 Ok(false)
             } else {
@@ -356,8 +397,8 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
 
         // Keep looping until we've got the entire trace
         loop {
-            #[cfg(test)]
-            println!("{:02X?}", context.registers);
+            // #[cfg(test)]
+            // println!("{:02X?}", context.registers);
 
             context.find_current_frames(&mut frames)?;
             if !context.try_unwind(&mut frames)? {
@@ -373,8 +414,8 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
 mod tests {
     use super::*;
 
-    const ELF: &[u8] = include_bytes!("../../examples/data/nrf52840");
-    const DUMP: &[u8] = include_bytes!("../../examples/data/nrf52840.dump");
+    const ELF: &[u8] = include_bytes!("../../../examples/data/nrf52840");
+    const DUMP: &[u8] = include_bytes!("../../../examples/data/nrf52840.dump");
 
     #[test]
     fn example_dump() {
@@ -389,14 +430,14 @@ mod tests {
     fn timeout_dump() {
         let stackdump: Stackdump<CortexMTarget, 32768> = TryFrom::try_from(
             &include_bytes!(
-                "../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.dump"
+                "../../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.dump"
             )[..],
         )
         .unwrap();
         let frames = stackdump
             .trace(
                 &include_bytes!(
-            "../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.elf"
+            "../../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.elf"
         )[..],
             )
             .unwrap();
