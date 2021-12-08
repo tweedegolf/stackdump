@@ -8,36 +8,30 @@ use gimli::{
     RunTimeEndian, UnwindContext, UnwindSection, UnwindTableRow,
 };
 use stackdump_capture::cortex_m::{CortexMRegisters, CortexMTarget};
-use stackdump_core::Stackdump;
+use stackdump_core::{MemoryRegion, Stackdump};
 use std::{error::Error, ops::Range};
 
 mod variables;
 
-struct UnwindingContext<'data, F>
-where
-    F: Fn(u32) -> Option<u32>,
-{
+struct UnwindingContext<'data, const STACK_SIZE: usize> {
     debug_frame: DebugFrame<EndianSlice<'data, LittleEndian>>,
     reset_vector_address_range: Range<u32>,
     text_address_range: Range<u32>,
     addr2line_context: Context<EndianRcSlice<RunTimeEndian>>,
     registers: CortexMRegisters,
-    stack_reader: F,
+    stack: MemoryRegion<STACK_SIZE>,
     bases: BaseAddresses,
     unwind_context: UnwindContext<EndianSlice<'data, LittleEndian>>,
 }
 
-impl<'data, F> UnwindingContext<'data, F>
-where
-    F: Fn(u32) -> Option<u32>,
-{
+impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
     const THUMB_BIT: u32 = 1;
     const LR_END: u32 = 0xFFFF_FFFF;
 
     pub fn create(
         elf: File<'data>,
         registers: CortexMRegisters,
-        stack_reader: F,
+        stack: MemoryRegion<STACK_SIZE>,
     ) -> Result<Self, Box<dyn Error>> {
         let addr2line_context = addr2line::Context::new(&elf).unwrap();
 
@@ -81,7 +75,7 @@ where
             text_address_range,
             addr2line_context,
             registers,
-            stack_reader,
+            stack,
             bases,
             unwind_context,
         })
@@ -131,6 +125,7 @@ where
                         unit,
                         &abbreviations,
                         &self.registers,
+                        &self.stack,
                         entry_root,
                         &mut variables,
                     );
@@ -267,7 +262,11 @@ where
             Ok(false)
         } else {
             // Is our stack pointer in a weird place?
-            if (self.stack_reader)(*self.registers.base.sp()).is_none() {
+            if self
+                .stack
+                .read_u32(*self.registers.base.sp() as usize, LittleEndian)
+                .is_none()
+            {
                 frames.push(Frame {
                     function: Some("Unknown".into()),
                     file: None,
@@ -307,7 +306,9 @@ where
                 RegisterRule::Offset(offset) => {
                     let cfa = *self.registers.base.sp();
                     let addr = (i64::from(cfa) + offset) as u32;
-                    let new_value = (self.stack_reader)(addr)
+                    let new_value = self
+                        .stack
+                        .read_u32(addr as usize, LittleEndian)
                         .ok_or(format!("Address {:#010X} not within stack space", addr))?;
                     *self.registers.base.register_mut(reg.0 as usize) = new_value;
                 }
@@ -331,11 +332,13 @@ where
     fn update_registers_with_exception_stack(&mut self, fpu: bool) -> Result<(), Box<dyn Error>> {
         let current_sp = *self.registers.base.sp();
 
-        let read_stack_var = |index: u32| {
-            (self.stack_reader)(current_sp + index * 4).ok_or(format!(
-                "Address {:#10X} out of range",
-                current_sp + index * 4
-            ))
+        let read_stack_var = |index: usize| {
+            self.stack
+                .read_u32(current_sp as usize + index * 4, LittleEndian)
+                .ok_or(format!(
+                    "Address {:#10X} out of range",
+                    current_sp as usize + index * 4
+                ))
         };
         *self.registers.base.register_mut(0) = read_stack_var(0)?;
         *self.registers.base.register_mut(1) = read_stack_var(1)?;
@@ -346,7 +349,7 @@ where
         *self.registers.base.pc_mut() = read_stack_var(6)?;
         *self.registers.base.psr_mut() = read_stack_var(7)?;
         // Adjust the sp with the size of what we've read
-        *self.registers.base.sp_mut() = *self.registers.base.sp() + 8;
+        *self.registers.base.sp_mut() = *self.registers.base.sp() + 8 * std::mem::size_of::<u32>() as u32;
 
         if fpu {
             *self.registers.fpu.fpu_register_mut(0) = read_stack_var(8)?;
@@ -380,25 +383,12 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
 
         // Get the elf file context
         let elf = addr2line::object::File::parse(elf_data).unwrap();
-        let mut context = UnwindingContext::create(elf, self.registers.clone(), |address| {
-            let start_address = *self.registers.base.sp();
-            let relative_address = address.checked_sub(start_address)? as usize;
-
-            if self.stack.len() >= relative_address + 4 {
-                Some(u32::from_le_bytes(
-                    self.stack[relative_address..(relative_address + 4)]
-                        .try_into()
-                        .unwrap(),
-                ))
-            } else {
-                None
-            }
-        })?;
+        let mut context = UnwindingContext::create(elf, self.registers.clone(), self.stack.clone())?;
 
         // Keep looping until we've got the entire trace
         loop {
-            // #[cfg(test)]
-            // println!("{:02X?}", context.registers);
+            #[cfg(test)]
+            println!("{:02X?}", context.registers);
 
             context.find_current_frames(&mut frames)?;
             if !context.try_unwind(&mut frames)? {
@@ -419,7 +409,7 @@ mod tests {
 
     #[test]
     fn example_dump() {
-        let stackdump: Stackdump<CortexMTarget, 32768> = serde_json::from_slice(DUMP).unwrap();
+        let stackdump: Stackdump<CortexMTarget, 1024> = serde_json::from_slice(DUMP).unwrap();
         let frames = stackdump.trace(ELF).unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);
@@ -428,7 +418,7 @@ mod tests {
 
     #[test]
     fn timeout_dump() {
-        let stackdump: Stackdump<CortexMTarget, 32768> = TryFrom::try_from(
+        let stackdump: Stackdump<CortexMTarget, 1024> = TryFrom::try_from(
             &include_bytes!(
                 "../../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.dump"
             )[..],

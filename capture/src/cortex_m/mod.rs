@@ -52,8 +52,9 @@ impl Target for CortexMTarget {
         if cfg!(feature = "cortex-m-fpu") {
             target.registers.fpu.capture();
         }
+        target.stack.start_address = *target.registers.base.sp() as u64;
         unsafe {
-            stack::capture_stack(*target.registers.base.sp(), &mut target.stack);
+            stack::capture_stack(*target.registers.base.sp(), &mut target.stack.data);
         }
     }
 

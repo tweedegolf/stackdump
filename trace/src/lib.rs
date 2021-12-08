@@ -57,7 +57,7 @@ pub enum FrameType {
 pub struct Variable {
     pub name: String,
     pub value: Option<String>,
-    pub variable_type: VariableType,
+    pub variable_type: VariableType, // TODO: Make this platform independent. Right now this only works for cortex-m
 }
 
 impl Display for Variable {
@@ -78,16 +78,19 @@ pub enum VariableType {
         type_name: String,
         type_params: Vec<TemplateTypeParam>,
         members: Vec<StructureMember>,
+        byte_size: u64,
     },
     Union {
         type_name: String,
         type_params: Vec<TemplateTypeParam>,
         members: Vec<StructureMember>,
+        byte_size: u64,
     },
     Class {
         type_name: String,
         type_params: Vec<TemplateTypeParam>,
         members: Vec<StructureMember>,
+        byte_size: u64,
     },
     BaseType {
         name: String,
@@ -99,16 +102,21 @@ pub enum VariableType {
         pointee_type: Box<VariableType>,
     },
     ArrayType {
+        /// The type of the elements in the array
         array_type: Box<VariableType>,
-        member_type: Box<VariableType>,
+        /// The lower bound index
         lower_bound: i64,
+        /// The amount of elements in the array
         count: u64,
+        /// The optionally given size in bytes
+        byte_size: Option<u64>,
     },
     EnumerationType {
         name: String,
         underlying_type: Box<VariableType>,
         enumerators: Vec<Enumerator>,
     },
+    Subroutine,
 }
 
 impl VariableType {
@@ -119,8 +127,31 @@ impl VariableType {
             VariableType::Class { type_name, .. } => type_name.clone(),
             VariableType::BaseType { name, .. } => name.clone(),
             VariableType::PointerType { name, .. } => name.clone(),
-            VariableType::ArrayType { array_type, count, .. } => format!("[{};{}]", array_type.get_first_level_name(), count),
+            VariableType::ArrayType {
+                array_type, count, ..
+            } => format!("[{};{}]", array_type.get_first_level_name(), count),
             VariableType::EnumerationType { name, .. } => name.clone(),
+            VariableType::Subroutine => "Unknown subroutine".into(),
+        }
+    }
+
+    pub fn get_variable_size(&self) -> u64 {
+        match self {
+            VariableType::Structure { byte_size, .. } => *byte_size,
+            VariableType::Union { byte_size, .. } => *byte_size,
+            VariableType::Class { byte_size, .. } => *byte_size,
+            VariableType::BaseType { byte_size, .. } => *byte_size,
+            VariableType::PointerType { .. } => 4, // Cortex-m specific
+            VariableType::ArrayType {
+                array_type,
+                count,
+                byte_size,
+                ..
+            } => byte_size.unwrap_or_else(|| array_type.get_variable_size() * count),
+            VariableType::EnumerationType {
+                underlying_type, ..
+            } => underlying_type.get_variable_size(),
+            VariableType::Subroutine => 0,
         }
     }
 }

@@ -1,5 +1,6 @@
 #![no_main]
 #![no_std]
+#![feature(asm)]
 
 use core::mem::MaybeUninit;
 use cortex_m::peripheral::NVIC;
@@ -10,7 +11,7 @@ use stackdump_capture::cortex_m::CortexMTarget;
 use stackdump_capture::stackdump_core::Stackdump;
 
 #[link_section = ".uninit"]
-static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, { 32 * 1024 }>> = MaybeUninit::uninit();
+static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, 1024>> = MaybeUninit::uninit();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -20,6 +21,10 @@ fn main() -> ! {
     rtt_init_print!(BlockIfFull);
     rprintln!("Generating interrupts");
 
+    let mut rng = nrf52840_hal::Rng::new(dp.RNG);
+    let increment = (rng.random_u32() % 4) + 1;
+    rprintln!("increment: {:p} - {}", &increment, increment);
+
     unsafe {
         NVIC::unmask(nrf52840_hal::pac::Interrupt::TIMER0);
     }
@@ -28,18 +33,21 @@ fn main() -> ! {
     timer.enable_interrupt();
     timer.start(100000u32);
 
-    do_loop();
+    do_loop(increment);
 }
 
 #[inline(never)]
-fn do_loop() -> ! {
+fn do_loop(increment: u32) -> ! {
     let mut num = 0;
+    let mut nums = [0, 0, 0, 0];
 
     loop {
-        num += 1;
+        num += increment;
+        nums[(num / increment) as usize % nums.len()] += increment;
 
         if num % 10000u32 == 0 {
-            rprintln!("{}", num);
+            rprintln!("num: {:p} - {}", &num, num);
+            rprintln!("nums: {:p} - {:?}", &nums, nums);
         }
     }
 }
@@ -59,6 +67,7 @@ fn TIMER0() {
         fn write_dump<const STACK_SIZE: usize>(dump: &mut Stackdump<CortexMTarget, STACK_SIZE>) {
             let mut buffer = [0; 80000];
             let size = serde_json_core::to_slice(&dump, &mut buffer).unwrap();
+            rprintln!("\n{:X?}\n", dump.stack);
             rprintln!("{}", core::str::from_utf8(&buffer[..size]).unwrap());
         }
 
