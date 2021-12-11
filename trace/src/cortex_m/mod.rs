@@ -1,6 +1,6 @@
 use crate::{Frame, FrameType, Trace};
 use addr2line::{
-    object::{File, Object, ObjectSection, ObjectSymbol},
+    object::{File, Object, ObjectSection, ObjectSymbol, SectionKind},
     Context,
 };
 use gimli::{
@@ -8,30 +8,33 @@ use gimli::{
     RunTimeEndian, UnwindContext, UnwindSection, UnwindTableRow,
 };
 use stackdump_capture::cortex_m::{CortexMRegisters, CortexMTarget};
-use stackdump_core::{MemoryRegion, Stackdump};
+use stackdump_core::{
+    device_memory::DeviceMemory,
+    memory_region::{MemoryRegion, VecMemoryRegion},
+    Stackdump,
+};
 use std::{error::Error, ops::Range};
 
 mod variables;
 
-struct UnwindingContext<'data, const STACK_SIZE: usize> {
+pub(self) const THUMB_BIT: u32 = 1;
+
+struct UnwindingContext<'data> {
     debug_frame: DebugFrame<EndianSlice<'data, LittleEndian>>,
     reset_vector_address_range: Range<u32>,
     text_address_range: Range<u32>,
     addr2line_context: Context<EndianRcSlice<RunTimeEndian>>,
     registers: CortexMRegisters,
-    stack: MemoryRegion<STACK_SIZE>,
+    device_memory: DeviceMemory,
     bases: BaseAddresses,
     unwind_context: UnwindContext<EndianSlice<'data, LittleEndian>>,
 }
 
-impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
-    const THUMB_BIT: u32 = 1;
-    const LR_END: u32 = 0xFFFF_FFFF;
-
+impl<'data> UnwindingContext<'data> {
     pub fn create(
         elf: File<'data>,
         registers: CortexMRegisters,
-        stack: MemoryRegion<STACK_SIZE>,
+        stack: Box<dyn MemoryRegion>,
     ) -> Result<Self, Box<dyn Error>> {
         let addr2line_context = addr2line::Context::new(&elf).unwrap();
 
@@ -69,13 +72,28 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
         let bases = BaseAddresses::default();
         let unwind_context = UnwindContext::new();
 
+        let mut device_memory = DeviceMemory::new();
+        device_memory.add_memory_region_boxed(stack);
+
+        elf.sections()
+            .filter(|section| match section.kind() {
+                SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => true,
+                _ => false,
+            })
+            .for_each(|section| {
+                device_memory.add_memory_region(VecMemoryRegion::new(
+                    section.address(),
+                    section.uncompressed_data().unwrap().to_vec(),
+                ));
+            });
+
         Ok(Self {
             debug_frame,
             reset_vector_address_range,
             text_address_range,
             addr2line_context,
             registers,
-            stack,
+            device_memory,
             bases,
             unwind_context,
         })
@@ -125,7 +143,7 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
                         unit,
                         &abbreviations,
                         &self.registers,
-                        &self.stack,
+                        &self.device_memory,
                         entry_root,
                         &mut variables,
                     );
@@ -195,8 +213,7 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
 
         // Do we have a corrupted stack?
         if !stack_pointer_changed
-            && *self.registers.base.lr() & !Self::THUMB_BIT
-                == *self.registers.base.pc() & !Self::THUMB_BIT
+            && *self.registers.base.lr() & !THUMB_BIT == *self.registers.base.pc() & !THUMB_BIT
         {
             // The stack pointer didn't change and our LR points to our current PC
             // If we unwound further we'd get the same frame again so we better stop
@@ -263,8 +280,8 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
         } else {
             // Is our stack pointer in a weird place?
             if self
-                .stack
-                .read_u32(*self.registers.base.sp() as usize, LittleEndian)
+                .device_memory
+                .read_u32(*self.registers.base.sp() as usize, RunTimeEndian::Little)
                 .is_none()
             {
                 frames.push(Frame {
@@ -307,8 +324,8 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
                     let cfa = *self.registers.base.sp();
                     let addr = (i64::from(cfa) + offset) as u32;
                     let new_value = self
-                        .stack
-                        .read_u32(addr as usize, LittleEndian)
+                        .device_memory
+                        .read_u32(addr as usize, RunTimeEndian::Little)
                         .ok_or(format!("Address {:#010X} not within stack space", addr))?;
                     *self.registers.base.register_mut(reg.0 as usize) = new_value;
                 }
@@ -320,8 +337,7 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
     }
 
     fn is_last_frame(&self) -> bool {
-        *self.registers.base.lr() == Self::LR_END
-            || *self.registers.base.lr() == 0
+        *self.registers.base.lr() == 0
             || self
                 .reset_vector_address_range
                 .contains(self.registers.base.pc())
@@ -333,8 +349,8 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
         let current_sp = *self.registers.base.sp();
 
         let read_stack_var = |index: usize| {
-            self.stack
-                .read_u32(current_sp as usize + index * 4, LittleEndian)
+            self.device_memory
+                .read_u32(current_sp as usize + index * 4, RunTimeEndian::Little)
                 .ok_or(format!(
                     "Address {:#10X} out of range",
                     current_sp as usize + index * 4
@@ -349,7 +365,8 @@ impl<'data, const STACK_SIZE: usize> UnwindingContext<'data, STACK_SIZE> {
         *self.registers.base.pc_mut() = read_stack_var(6)?;
         *self.registers.base.psr_mut() = read_stack_var(7)?;
         // Adjust the sp with the size of what we've read
-        *self.registers.base.sp_mut() = *self.registers.base.sp() + 8 * std::mem::size_of::<u32>() as u32;
+        *self.registers.base.sp_mut() =
+            *self.registers.base.sp() + 8 * std::mem::size_of::<u32>() as u32;
 
         if fpu {
             *self.registers.fpu.fpu_register_mut(0) = read_stack_var(8)?;
@@ -383,12 +400,13 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
 
         // Get the elf file context
         let elf = addr2line::object::File::parse(elf_data).unwrap();
-        let mut context = UnwindingContext::create(elf, self.registers.clone(), self.stack.clone())?;
+        let mut context =
+            UnwindingContext::create(elf, self.registers.clone(), Box::new(self.stack.clone()))?;
 
         // Keep looping until we've got the entire trace
         loop {
-            #[cfg(test)]
-            println!("{:02X?}", context.registers);
+            // #[cfg(test)]
+            // println!("{:02X?}", context.registers);
 
             context.find_current_frames(&mut frames)?;
             if !context.try_unwind(&mut frames)? {
@@ -409,7 +427,7 @@ mod tests {
 
     #[test]
     fn example_dump() {
-        let stackdump: Stackdump<CortexMTarget, 1024> = serde_json::from_slice(DUMP).unwrap();
+        let stackdump: Stackdump<CortexMTarget, 2048> = serde_json::from_slice(DUMP).unwrap();
         let frames = stackdump.trace(ELF).unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);

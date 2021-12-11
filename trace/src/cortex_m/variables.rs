@@ -5,8 +5,8 @@ use gimli::{
     EvaluationResult, Piece, Reader, RunTimeEndian, Unit,
 };
 use stackdump_capture::cortex_m::CortexMRegisters;
-use stackdump_core::MemoryRegion;
-use std::rc::Rc;
+use stackdump_core::device_memory::DeviceMemory;
+use std::{rc::Rc, ops::Deref};
 
 fn get_entry_name(
     context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
@@ -280,9 +280,7 @@ fn find_type(
                 enumerators,
             })
         }
-        gimli::constants::DW_TAG_subroutine_type => {
-            Some(VariableType::Subroutine)
-        }
+        gimli::constants::DW_TAG_subroutine_type => Some(VariableType::Subroutine),
         tag => {
             eprintln!(
                 "Variable type not implement yet: {}",
@@ -298,12 +296,12 @@ fn get_variable_location(
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     registers: &CortexMRegisters,
     entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-) -> Vec<Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>> {
+) -> VariableLocationResult {
     let maybe_location = entry.attr(gimli::constants::DW_AT_location).unwrap();
 
     let location = match maybe_location {
         Some(location) => location.value(),
-        None => return Vec::new(),
+        None => return VariableLocationResult::NoLocationAttribute,
     };
 
     let location_expression = match location {
@@ -313,17 +311,19 @@ fn get_variable_location(
             let mut location = None;
 
             while let Ok(Some(maybe_location)) = locations.next() {
-                if u64::from(*registers.base.pc()) >= maybe_location.range.begin
-                    && u64::from(*registers.base.pc()) < maybe_location.range.end
-                {
+                // The .debug_loc does not seem to count the thumb bit, so remove it
+                let check_pc = u64::from(*registers.base.pc() & !super::THUMB_BIT);
+
+                if check_pc >= maybe_location.range.begin && check_pc < maybe_location.range.end {
                     location = Some(maybe_location);
+                    break;
                 }
             }
 
             if let Some(location) = location {
                 location.data
             } else {
-                return Vec::new();
+                return VariableLocationResult::LocationListNotFound;
             }
         }
         _ => unreachable!(),
@@ -339,7 +339,6 @@ fn get_variable_location(
                 base_type: _,
             } => {
                 let value = registers.base.register(register.0 as usize);
-                println!("Register {}: {:#08X}", register.0, value);
                 result = location_evaluation
                     .resume_with_register(gimli::Value::U32(*value))
                     .unwrap();
@@ -348,79 +347,130 @@ fn get_variable_location(
         }
     }
 
-    location_evaluation.result()
+    let mut result = location_evaluation.result();
+
+    match result.len() {
+        0 => VariableLocationResult::NoLocationFound,
+        1 => VariableLocationResult::LocationFound(result.remove(0)),
+        _ => VariableLocationResult::LocationsFound(result),
+    }
 }
 
-fn get_variable_value<const STACK_SIZE: usize>(
-    stack: &MemoryRegion<STACK_SIZE>,
+fn get_variable_value(
+    device_memory: &DeviceMemory,
     registers: &CortexMRegisters,
     variable_type: &VariableType,
-    variable_location: &Vec<Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>>,
-) -> Option<String> {
+    variable_location: VariableLocationResult,
+) -> Result<String, String> {
     let variable_size = variable_type.get_variable_size();
 
-    if variable_location.len() == 0 {
-        return None;
-    }
-
-    let data = if variable_location.len() == 1 {
-        let piece = variable_location.first().unwrap();
-
-        match piece.location.clone() {
-            gimli::Location::Empty => return Some("Optimized away".into()),
-            gimli::Location::Register { register } => Some(
-                registers
-                    .base
-                    .register(register.0.into())
-                    .to_le_bytes()
-                    .to_vec(),
-            ),
-            gimli::Location::Address { address } => stack
-                .read_slice(address as usize..(address + variable_size) as usize)
-                .map(|b| b.to_vec()),
-            gimli::Location::Value { value: _ } => todo!(),
-            gimli::Location::Bytes { value } => {
-                value.get(0..variable_size as usize).map(|b| b.to_vec())
-            }
-            gimli::Location::ImplicitPointer {
-                value: _,
-                byte_offset: _,
-            } => todo!(),
+    match variable_location {
+        VariableLocationResult::NoLocationAttribute => {
+            Err("Optimized away (No location attribute)".into())
         }
-    } else {
-        return None;
-    };
+        VariableLocationResult::LocationListNotFound => {
+            Err("Location list not found for the current PC value (A variable lower on the stack may contain the value)".into())
+        }
+        VariableLocationResult::NoLocationFound => {
+            Err("Optimized away (No location at this point)".into())
+        }
+        VariableLocationResult::LocationFound(piece) => {
+            let data = match piece.location.clone() {
+                gimli::Location::Empty => return Err("Optimized away (Empty location)".into()),
+                gimli::Location::Register { register } => match register.0 {
+                    // Check R0..=R15
+                    r @ 0..=15 => Some(registers.base.register(r.into()).to_le_bytes().to_vec()),
+                    // Check S0..=S31
+                    r @ 256..=271 => {
+                        let s_l = registers.fpu.fpu_register(r as usize - 256).to_le_bytes();
+                        let s_h = registers
+                            .fpu
+                            .fpu_register(r as usize - 256 + 1)
+                            .to_le_bytes();
+                        let mut data = vec![];
+                        data.extend_from_slice(&s_l);
+                        data.extend_from_slice(&s_h);
+                        Some(data)
+                    }
+                    _ => unreachable!(
+                        "Register {} is not available",
+                        gimli::Arm::register_name(register).unwrap()
+                    ),
+                },
+                gimli::Location::Address { address } => device_memory
+                    .read_slice(address as usize..(address + variable_size) as usize)
+                    .map(|b| b.to_vec()),
+                gimli::Location::Value { value: _ } => todo!("`Value` location not yet supported"),
+                gimli::Location::Bytes { value } => {
+                    value.get(0..variable_size as usize).map(|b| b.to_vec())
+                }
+                gimli::Location::ImplicitPointer {
+                    value: _,
+                    byte_offset: _,
+                } => todo!("`ImplicitPointer` location not yet supported"),
+            };
 
-    let data = if let Some(data) = data {
-        data
-    } else {
-        // Data is not on the stack
-        return Some("Data is not available".into());
-    };
+            let data = if let Some(data) = data {
+                data
+            } else {
+                // Data is not on the stack
+                return Err("Data is not available in registers or stack".into());
+            };
 
-    Some(read_variable(variable_type, &data))
+            read_variable(variable_type, &data, device_memory)
+        }
+        VariableLocationResult::LocationsFound(pieces) => {
+            Err(format!("Multi piece variables not yet supported: {:?}", pieces))
+        }
+    }
 }
 
-fn read_variable(variable_type: &VariableType, data: &[u8]) -> String {
+fn read_variable(
+    variable_type: &VariableType,
+    data: &[u8],
+    device_memory: &DeviceMemory,
+) -> Result<String, String> {
+    fn read_base_type(
+        encoding: &gimli::DwAte,
+        byte_size: &u64,
+        data: &[u8],
+    ) -> Result<String, String> {
+        match *encoding {
+            gimli::constants::DW_ATE_unsigned => match byte_size {
+                1 => Ok(format!("{}", u8::from_le_bytes(data.try_into().unwrap()))),
+                2 => Ok(format!("{}", u16::from_le_bytes(data.try_into().unwrap()))),
+                4 => Ok(format!("{}", u32::from_le_bytes(data.try_into().unwrap()))),
+                8 => Ok(format!("{}", u64::from_le_bytes(data.try_into().unwrap()))),
+                16 => Ok(format!("{}", u128::from_le_bytes(data.try_into().unwrap()))),
+                _ => unreachable!(),
+            },
+            gimli::constants::DW_ATE_signed => match byte_size {
+                1 => Ok(format!("{}", i8::from_le_bytes(data.try_into().unwrap()))),
+                2 => Ok(format!("{}", i16::from_le_bytes(data.try_into().unwrap()))),
+                4 => Ok(format!("{}", i32::from_le_bytes(data.try_into().unwrap()))),
+                8 => Ok(format!("{}", i64::from_le_bytes(data.try_into().unwrap()))),
+                16 => Ok(format!("{}", i128::from_le_bytes(data.try_into().unwrap()))),
+                _ => unreachable!(),
+            },
+            gimli::constants::DW_ATE_float => match byte_size {
+                4 => Ok(format!("{}", f32::from_le_bytes(data.try_into().unwrap()))),
+                8 => Ok(format!("{}", f64::from_le_bytes(data.try_into().unwrap()))),
+                _ => unreachable!(),
+            },
+            t => Err(format!(
+                "Unimplemented BaseType encoding {} - data: {:X?}",
+                t.static_string().unwrap(),
+                data
+            )),
+        }
+    }
+
     match variable_type {
         VariableType::BaseType {
             encoding,
             byte_size,
             ..
-        } => match encoding.clone() {
-            gimli::constants::DW_ATE_unsigned => match byte_size {
-                1 => format!("{}", u8::from_le_bytes(data.try_into().unwrap())),
-                2 => format!("{}", u16::from_le_bytes(data.try_into().unwrap())),
-                4 => format!("{}", u32::from_le_bytes(data.try_into().unwrap())),
-                8 => format!("{}", u64::from_le_bytes(data.try_into().unwrap())),
-                _ => unreachable!(),
-            },
-            t => format!(
-                "Unimplemented encoding {} - data: {:X?}",
-                t.static_string().unwrap(),
-                data
-            ),
-        },
+        } => read_base_type(encoding, byte_size, data),
         VariableType::ArrayType {
             array_type, count, ..
         } => {
@@ -430,25 +480,76 @@ fn read_variable(variable_type: &VariableType, data: &[u8]) -> String {
             let mut values = Vec::new();
 
             for chunk in element_data_chunks.take(*count as usize) {
-                values.push(read_variable(array_type, chunk));
+                values.push(read_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
             }
 
-            format!("[{}]", values.join(", "))
+            Ok(format!("[{}]", values.join(", ")))
         }
-        t => format!(
-            "Unimplemented variable type {} - data: {:X?}",
+        VariableType::PointerType { pointee_type, .. } => {
+            // Cortex m, so pointer is little endian u32
+            let address = u32::from_le_bytes(data.try_into().unwrap()) as usize;
+            let pointee_size = pointee_type.get_variable_size() as usize;
+            let pointee_memory = device_memory.read_slice(address..(address + pointee_size));
+
+            let pointee_value = match pointee_memory {
+                Some(data) => read_variable(pointee_type, data, device_memory),
+                None => Err(String::from("(Not within available memory)")),
+            };
+
+            Ok(format!(
+                "*{:#010X} = {}",
+                address,
+                pointee_value.unwrap_or_else(|e| format!("Error: {}", e))
+            ))
+        }
+        VariableType::EnumerationType {
+            name,
+            underlying_type,
+            enumerators,
+        } => {
+            let underlying_value = match underlying_type.deref() {
+                VariableType::BaseType {
+                    encoding,
+                    byte_size,
+                    ..
+                } => read_base_type(encoding, byte_size, data),
+                t => Err(format!(
+                    "Enumeration underlying type is not a BaseType: {}",
+                    t.get_first_level_name()
+                )),
+            }?;
+
+            let underlying_value: i64 = underlying_value.parse().map_err(|_| {
+                format!(
+                    "Could not parse the underlying type as an integer: {}",
+                    underlying_value
+                )
+            })?;
+
+            let enumerator = enumerators
+                .iter()
+                .find(|e| e.const_value == underlying_value);
+
+            match enumerator {
+                Some(enumerator) => Ok(format!("{}::{}", name, enumerator.name)),
+                None => Err(format!("{}", underlying_value)),
+            }
+        }
+        t => Err(format!(
+            "(Unimplemented variable type {} ({}) - data: {:X?})",
             t.get_first_level_name(),
+            t.get_raw_name(),
             data
-        ),
+        )),
     }
 }
 
-pub fn find_variables<const STACK_SIZE: usize>(
+pub fn find_variables(
     context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     abbreviations: &Abbreviations,
     registers: &CortexMRegisters,
-    stack: &MemoryRegion<STACK_SIZE>,
+    device_memory: &DeviceMemory,
     node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     variables: &mut Vec<Variable>,
 ) {
@@ -476,10 +577,12 @@ pub fn find_variables<const STACK_SIZE: usize>(
             .flatten();
 
         match (variable_name, variable_type) {
-            (Some(variable_name), Some(variable_type)) if variable_type.get_variable_size() == 0 => {
+            (Some(variable_name), Some(variable_type))
+                if variable_type.get_variable_size() == 0 =>
+            {
                 variables.push(Variable {
                     name: variable_name,
-                    value: Some("{}".into()),
+                    value: Ok("{ (ZST) }".into()),
                     variable_type,
                 })
             }
@@ -487,9 +590,8 @@ pub fn find_variables<const STACK_SIZE: usize>(
                 // Get the value of the variable
                 let variable_location = get_variable_location(context, unit, registers, entry);
 
-                println!("{} is at {:X?}", variable_name, variable_location);
                 let variable_value =
-                    get_variable_value(stack, registers, &variable_type, &variable_location);
+                    get_variable_value(device_memory, registers, &variable_type, variable_location);
 
                 variables.push(Variable {
                     name: variable_name,
@@ -508,9 +610,23 @@ pub fn find_variables<const STACK_SIZE: usize>(
             unit,
             abbreviations,
             registers,
-            stack,
+            device_memory,
             child,
             variables,
         );
     }
+}
+
+#[derive(Debug)]
+enum VariableLocationResult {
+    /// The DW_AT_location attribute is missing
+    NoLocationAttribute,
+    /// The location list could not be found in the ELF
+    LocationListNotFound,
+    /// This variable is not present in memory at this point
+    NoLocationFound,
+    /// The variable is present in a single piece of memory
+    LocationFound(Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>),
+    /// The variable is split up into multiple pieces of memory
+    LocationsFound(Vec<Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>>),
 }

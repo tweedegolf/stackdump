@@ -56,7 +56,7 @@ pub enum FrameType {
 #[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
-    pub value: Option<String>,
+    pub value: Result<String, String>,
     pub variable_type: VariableType, // TODO: Make this platform independent. Right now this only works for cortex-m
 }
 
@@ -66,7 +66,9 @@ impl Display for Variable {
             f,
             "{}: {} ({})",
             self.name,
-            self.value.clone().unwrap_or("UNKNOWN".to_string()),
+            self.value
+                .clone()
+                .unwrap_or_else(|e| String::from("Error: ") + &e),
             self.variable_type.get_first_level_name(),
         )
     }
@@ -132,6 +134,19 @@ impl VariableType {
             } => format!("[{};{}]", array_type.get_first_level_name(), count),
             VariableType::EnumerationType { name, .. } => name.clone(),
             VariableType::Subroutine => "Unknown subroutine".into(),
+        }
+    }
+
+    pub fn get_raw_name(&self) -> &str {
+        match self {
+            VariableType::Structure { .. } => "Structure",
+            VariableType::Union { .. } => "Union",
+            VariableType::Class { .. } => "Class",
+            VariableType::BaseType { .. } => "BaseType",
+            VariableType::PointerType { .. } => "PointerType",
+            VariableType::ArrayType { .. } => "ArrayType",
+            VariableType::EnumerationType { .. } => "EnumerationType",
+            VariableType::Subroutine => "Subroutine",
         }
     }
 

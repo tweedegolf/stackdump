@@ -11,7 +11,7 @@ use stackdump_capture::cortex_m::CortexMTarget;
 use stackdump_capture::stackdump_core::Stackdump;
 
 #[link_section = ".uninit"]
-static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, 1024>> = MaybeUninit::uninit();
+static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, 2048>> = MaybeUninit::uninit();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -33,21 +33,34 @@ fn main() -> ! {
     timer.enable_interrupt();
     timer.start(100000u32);
 
-    do_loop(increment);
+    let res = do_loop(&increment);
+
+    rprintln!("{}", res);
+
+    loop {
+
+    }
 }
 
 #[inline(never)]
-fn do_loop(increment: u32) -> ! {
+fn do_loop(increment: &u32) -> f64 {
     let mut num = 0;
     let mut nums = [0, 0, 0, 0];
+    let mut fnum = 0.0;
 
     loop {
         num += increment;
         nums[(num / increment) as usize % nums.len()] += increment;
+        fnum += 0.01;
 
         if num % 10000u32 == 0 {
             rprintln!("num: {:p} - {}", &num, num);
             rprintln!("nums: {:p} - {:?}", &nums, nums);
+            rprintln!("fnum: {:p} - {}", &fnum, fnum);
+        }
+
+        if num > u32::MAX - increment {
+            break fnum;
         }
     }
 }
