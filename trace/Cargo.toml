@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 addr2line = "0.17.0"
 gimli = "0.26.1"
+bitvec = "0.22.3"
 stackdump-core = { path = "../core", default-features = false }
 stackdump-capture = { path = "../capture", default-features = false, features = ["std", "cortex-m"] }
 

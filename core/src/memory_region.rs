@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
+use core::ops::Range;
 use serde::{Deserialize, Serialize};
-use std::ops::Range;
 
 pub trait MemoryRegion {
     fn address_range(&self) -> Range<usize>;

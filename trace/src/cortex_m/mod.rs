@@ -146,6 +146,7 @@ impl<'data> UnwindingContext<'data> {
                         &self.device_memory,
                         entry_root,
                         &mut variables,
+                        None,
                     );
                 }
             }

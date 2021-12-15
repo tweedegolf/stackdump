@@ -68,13 +68,14 @@ impl Display for Variable {
             self.name,
             self.value
                 .clone()
-                .unwrap_or_else(|e| String::from("Error: ") + &e),
+                .unwrap_or_else(|e| format!("Error({})", &e)),
             self.variable_type.get_first_level_name(),
         )
     }
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum VariableType {
     Structure {
         type_name: String,
@@ -175,6 +176,7 @@ impl VariableType {
 pub struct StructureMember {
     pub name: String,
     pub member_type: VariableType,
+    pub member_location: u64,
 }
 
 #[derive(Debug, Clone)]
