@@ -364,7 +364,6 @@ impl<'data> UnwindingContext<'data> {
         *self.registers.base.register_mut(12) = read_stack_var(4)?;
         *self.registers.base.lr_mut() = read_stack_var(5)?;
         *self.registers.base.pc_mut() = read_stack_var(6)?;
-        *self.registers.base.psr_mut() = read_stack_var(7)?;
         // Adjust the sp with the size of what we've read
         *self.registers.base.sp_mut() =
             *self.registers.base.sp() + 8 * std::mem::size_of::<u32>() as u32;
@@ -386,7 +385,6 @@ impl<'data> UnwindingContext<'data> {
             *self.registers.fpu.fpu_register_mut(13) = read_stack_var(21)?;
             *self.registers.fpu.fpu_register_mut(14) = read_stack_var(22)?;
             *self.registers.fpu.fpu_register_mut(15) = read_stack_var(23)?;
-            *self.registers.fpu.fpscr_mut() = read_stack_var(24)?;
             // Adjust the sp with the size of what we've read
             *self.registers.base.sp_mut() = *self.registers.base.sp() + 17;
         }
@@ -428,28 +426,8 @@ mod tests {
 
     #[test]
     fn example_dump() {
-        let stackdump: Stackdump<CortexMTarget, 2048> = serde_json::from_slice(DUMP).unwrap();
+        let stackdump: Stackdump<CortexMTarget, 2048> = Stackdump::try_from(DUMP).unwrap();
         let frames = stackdump.trace(ELF).unwrap();
-        for (i, frame) in frames.iter().enumerate() {
-            println!("{}: {}", i, frame);
-        }
-    }
-
-    #[test]
-    fn timeout_dump() {
-        let stackdump: Stackdump<CortexMTarget, 1024> = TryFrom::try_from(
-            &include_bytes!(
-                "../../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.dump"
-            )[..],
-        )
-        .unwrap();
-        let frames = stackdump
-            .trace(
-                &include_bytes!(
-            "../../../examples/data/fuzzing/timeout-61d28ea075b2ad7cca2076b488e4c768771edf80.elf"
-        )[..],
-            )
-            .unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);
         }

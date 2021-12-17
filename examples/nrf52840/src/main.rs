@@ -1,12 +1,11 @@
 #![no_main]
 #![no_std]
-#![feature(asm)]
 
 use core::mem::MaybeUninit;
 use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
-use rtt_target::{rprintln, rtt_init_print};
+use rtt_target::{rprintln, rtt_init, rtt_init_print, UpChannel};
 use stackdump_capture::cortex_m::CortexMTarget;
 use stackdump_capture::stackdump_core::Stackdump;
 
@@ -17,15 +16,34 @@ const MESSAGES: [&'static str; 4] = [
     "I love you",
     "I hate you",
     "I am indifferent to you",
-    "I like you"
+    "I like you",
 ];
+
+static mut DUMP_RTT_CHANNEL: Option<UpChannel> = None;
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let _cp = cortex_m::Peripherals::take().unwrap();
     let dp = nrf52840_hal::pac::Peripherals::take().unwrap();
 
-    rtt_init_print!(BlockIfFull);
+    let channels = rtt_init! {
+        up: {
+            0: {
+                size: 1024
+                mode: BlockIfFull
+                name: "Terminal"
+            }
+            1: {
+                size: 1024
+                mode: BlockIfFull
+                name: "Dump"
+            }
+        }
+    };
+
+    unsafe { DUMP_RTT_CHANNEL = Some(channels.up.1) }
+    rtt_target::set_print_channel(channels.up.0);
+
     rprintln!("Generating interrupts");
 
     let mut rng = nrf52840_hal::Rng::new(dp.RNG);
@@ -46,9 +64,7 @@ fn main() -> ! {
 
     rprintln!("{}", res);
 
-    loop {
-
-    }
+    loop {}
 }
 
 #[inline(never)]
@@ -92,20 +108,23 @@ fn TIMER0() {
 
         #[inline(never)]
         fn write_dump<const STACK_SIZE: usize>(dump: &mut Stackdump<CortexMTarget, STACK_SIZE>) {
-            let mut buffer = [0; 80000];
-            let size = serde_json_core::to_slice(&dump, &mut buffer).unwrap();
-            rprintln!("\n{}", core::str::from_utf8(&buffer[..size]).unwrap());
+            let mut buffer = [0; 1024];
+            let mut dump_reader = dump.get_reader();
+            while let Ok(bytes @ 1..) = dump_reader.read(&mut buffer) {
+                unsafe {
+                    DUMP_RTT_CHANNEL.as_mut().unwrap().write(&buffer[..bytes]);
+                }
+            }
         }
 
         write_dump(dump);
     }
 
-    cortex_m::asm::bkpt();
+    panic!();
 }
 
 #[cortex_m_rt::exception]
 unsafe fn HardFault(frame: &cortex_m_rt::ExceptionFrame) -> ! {
-    cortex_m::asm::bkpt();
     panic!("{:?}", frame);
 }
 

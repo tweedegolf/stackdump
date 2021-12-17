@@ -12,6 +12,6 @@ gimli = { version = "0.26.1", optional = true }
 arbitrary = { version = "1", optional = true, features = ["derive"] }
 
 [features]
-std = ["arrayvec/std", "gimli"]
+std = ["arrayvec/std", "gimli", "serde/std"]
 default = ["std"]
 fuzzer = ["arbitrary"]

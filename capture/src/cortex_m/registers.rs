@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
-pub struct CortexMBaseRegisters([u32; 17]);
+pub struct CortexMBaseRegisters([u32; 16]);
 
 impl core::fmt::Debug for CortexMBaseRegisters {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -31,6 +31,8 @@ impl CortexMBaseRegisters {
     #[cfg(feature = "capture")]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
+        use core::arch::asm;
+
         unsafe {
             asm!(
                 "str r0, [{0}, #0]",
@@ -50,8 +52,6 @@ impl CortexMBaseRegisters {
                 "str lr, [{0}, #56]",
                 "mov {tmp}, pc", // We can't use the str instruction with the PC register directly, so store it in tmp
                 "str {tmp}, [{0}, #60]",
-                "mrs {tmp}, apsr", // We can't get the program status register normally, so store it in tmp
-                "str {tmp}, [{0}, #64]",
                 in(reg) self.0.as_ptr(),
                 tmp = out(reg) _,
             );
@@ -74,10 +74,6 @@ impl CortexMBaseRegisters {
         &self.0[15]
     }
 
-    pub fn psr(&self) -> &u32 {
-        &self.0[16]
-    }
-
     pub fn register_mut(&mut self, index: usize) -> &mut u32 {
         &mut self.0[index]
     }
@@ -94,13 +90,27 @@ impl CortexMBaseRegisters {
         &mut self.0[15]
     }
 
-    pub fn psr_mut(&mut self) -> &mut u32 {
-        &mut self.0[16]
+    pub fn copy_bytes(&self) -> [u8; 16 * 4] {
+        let mut bytes = [0; 16 * 4];
+        for (i, r) in self.0.iter().enumerate() {
+            bytes[i * 4..][..4].copy_from_slice(&r.to_le_bytes());
+        }
+        bytes
+    }
+
+    pub fn from_bytes(bytes: [u8; 16 * 4]) -> Self {
+        let mut s = Self::default();
+
+        for (i, r) in bytes.chunks(4).enumerate() {
+            s.0[i] = u32::from_le_bytes(r.try_into().unwrap());
+        }
+
+        s
     }
 }
 
 impl Default for CortexMBaseRegisters {
     fn default() -> Self {
-        Self([0; 17])
+        Self([0; 16])
     }
 }

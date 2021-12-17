@@ -1,0 +1,34 @@
+[default.probe]
+protocol = "Swd"
+
+[default.flashing]
+enabled = true
+
+[default.reset]
+enabled = true
+
+[default.general]
+# The chip name of the chip to be debugged.
+chip = "nrf52840_xxAA"
+# A list of chip descriptions to be loaded during runtime.
+log_level = "WARN"
+# Use this flag to assert the nreset & ntrst pins during attaching the probe to the chip.
+connect_under_reset = false
+
+[default.rtt]
+# Whether or not an RTTUI should be opened after flashing.
+enabled = true
+# A list of channel associations to be displayed. If left empty, all channels are displayed.
+# formats are: String, Defmt, BinaryLE,
+channels = [
+    { up = 0, name = "logs", format = "String" },
+    { up = 1, name = "dump", format = "BinaryLE" },
+]
+# The duration in ms for which the logger should retry to attach to RTT.
+timeout = 3000
+# Whether timestamps in the RTTUI are enabled
+show_timestamps = true
+# Whether to save rtt history buffer on exit.
+log_enabled = true
+# Where to save rtt history buffer relative to manifest path.
+log_path = "./logs"

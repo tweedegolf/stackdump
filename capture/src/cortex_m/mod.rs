@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use stackdump_core::{RegisterContainer, Stackdump, Target};
 
+use self::{fpu_registers::CortexMFpuRegisters, registers::CortexMBaseRegisters};
+
 pub mod fpu_registers;
 pub mod registers;
 #[cfg(feature = "capture")]
@@ -13,31 +15,26 @@ pub struct CortexMRegisters {
 }
 
 impl RegisterContainer for CortexMRegisters {
-    fn try_from(data: &[u8]) -> Result<(Self, &[u8]), ()> {
-        let mut s = Self {
-            base: Default::default(),
-            fpu: Default::default(),
-        };
+    const DATA_SIZE: usize = 16 * 4 + 32 * 4;
 
-        let mut data_left = data;
-
-        for i in 0..17 {
-            *s.base.register_mut(i) =
-                u32::from_le_bytes((&data_left[..4]).try_into().map_err(|_| ())?);
-            data_left = &data_left[4..];
-        }
-
-        for i in 0..33 {
-            *s.fpu.fpu_register_mut(i) =
-                u32::from_le_bytes((&data_left[..4]).try_into().map_err(|_| ())?);
-            data_left = &data_left[4..];
-        }
-
-        Ok((s, data_left))
+    fn read(&self, offset: usize, buf: &mut [u8]) {
+        let mut data = [0; Self::DATA_SIZE];
+        data[..16 * 4].copy_from_slice(&self.base.copy_bytes());
+        data[16 * 4..].copy_from_slice(&self.fpu.copy_bytes());
+        buf.copy_from_slice(&data[offset..][..buf.len()]);
     }
 
-    fn min_data_size() -> usize {
-        17 * 4 + 33 * 4
+    fn try_from(data: &[u8]) -> Result<Self, ()> {
+        if data.len() < Self::DATA_SIZE {
+            return Err(());
+        }
+
+        let (base_bytes, fpu_bytes) = data[..Self::DATA_SIZE].split_at(16 * 4);
+
+        Ok(Self {
+            base: CortexMBaseRegisters::from_bytes(base_bytes.try_into().unwrap()),
+            fpu: CortexMFpuRegisters::from_bytes(fpu_bytes.try_into().unwrap()),
+        })
     }
 }
 

@@ -1,17 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CortexMFpuRegisters {
-    registers: [u32; 32],
-    fpscr: u32,
-}
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CortexMFpuRegisters([u32; 32]);
 
 impl Default for CortexMFpuRegisters {
     fn default() -> Self {
-        Self {
-            registers: [0; 32],
-            fpscr: 0,
-        }
+        Self([0; 32])
     }
 }
 
@@ -19,6 +13,8 @@ impl CortexMFpuRegisters {
     #[cfg(feature = "capture")]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
+        use core::arch::asm;
+
         unsafe {
             asm!(
                 "vstr s0, [{0}, #0]",
@@ -53,34 +49,53 @@ impl CortexMFpuRegisters {
                 "vstr s29, [{0}, #116]",
                 "vstr s30, [{0}, #120]",
                 "vstr s31, [{0}, #124]",
-                "vmrs {tmp}, fpscr",
-                "str {tmp}, [{1}]",
-                in(reg) self.registers.as_ptr(),
-                in(reg) &mut self.fpscr as *mut u32,
-                tmp = out(reg) _,
+                in(reg) self.0.as_ptr(),
             );
         }
     }
 
     pub fn fpu_register(&self, index: usize) -> &u32 {
-        match index {
-            32 => self.fpscr(),
-            index => &self.registers[index],
-        }
+        &self.0[index]
     }
 
     pub fn fpu_register_mut(&mut self, index: usize) -> &mut u32 {
-        match index {
-            32 => self.fpscr_mut(),
-            index => &mut self.registers[index],
+        &mut self.0[index]
+    }
+
+    pub fn copy_bytes(&self) -> [u8; 32 * 4] {
+        let mut bytes = [0; 32 * 4];
+        for (i, r) in self.0.iter().enumerate() {
+            bytes[i * 4..][..4].copy_from_slice(&r.to_le_bytes());
         }
+        bytes
     }
 
-    pub fn fpscr(&self) -> &u32 {
-        &self.fpscr
-    }
+    pub fn from_bytes(bytes: [u8; 32 * 4]) -> Self {
+        let mut s = Self::default();
 
-    pub fn fpscr_mut(&mut self) -> &mut u32 {
-        &mut self.fpscr
+        for (i, r) in bytes.chunks(4).enumerate() {
+            s.0[i] = u32::from_le_bytes(r.try_into().unwrap());
+        }
+
+        s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bytes() {
+        let mut registers = CortexMFpuRegisters::default();
+        // Set the registers to a random value. This also sets the highest bytes for some registers, so endianness is (kind of) tested
+        for i in 0..32 {
+            *registers.fpu_register_mut(i as usize) = 1 << i;
+        }
+
+        let bytes = registers.copy_bytes();
+        let copy_registers = CortexMFpuRegisters::from_bytes(bytes);
+
+        assert_eq!(registers, copy_registers);
     }
 }
