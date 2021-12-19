@@ -42,7 +42,7 @@ pub struct CortexMTarget {}
 impl Target for CortexMTarget {
     type Registers = CortexMRegisters;
 
-    #[cfg(feature = "capture")]
+    #[cfg(all(feature = "capture", cortex_m))]
     fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>) {
         target.registers.base.capture();
         #[cfg(has_fpu)]
@@ -53,7 +53,7 @@ impl Target for CortexMTarget {
         }
     }
 
-    #[cfg(not(feature = "capture"))]
+    #[cfg(not(all(feature = "capture", cortex_m)))]
     fn capture<const STACK_SIZE: usize>(_target: &mut Stackdump<Self, STACK_SIZE>) {
         unimplemented!("Activate the 'capture' feature to have this functionality");
     }
