@@ -87,7 +87,7 @@ fn find_type(
                     None => continue, // Only care about named members for now
                 };
 
-                let member_type = get_entry_type_reference_tree(unit, abbreviations, member_entry)
+                let member_type = || get_entry_type_reference_tree(unit, abbreviations, member_entry)
                     .map(|mut type_tree| {
                         type_tree
                             .root()
@@ -95,7 +95,8 @@ fn find_type(
                             .ok()
                     })
                     .flatten()
-                    .flatten();
+                    .flatten()
+                    .unwrap();
 
                 match member_entry.tag() {
                     gimli::constants::DW_TAG_member => {
@@ -108,14 +109,14 @@ fn find_type(
 
                         members.push(StructureMember {
                             name: member_name,
-                            member_type: member_type.unwrap(),
+                            member_type: member_type(),
                             member_location,
                         });
                     }
                     gimli::constants::DW_TAG_template_type_parameter => {
                         type_params.push(TemplateTypeParam {
                             name: member_name,
-                            template_type: member_type.unwrap(),
+                            template_type: member_type(),
                         })
                     }
                     gimli::constants::DW_TAG_subprogram => {} // Ignore
