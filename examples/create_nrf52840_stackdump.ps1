@@ -1,7 +1,7 @@
 # Go to the application
 Set-Location -Path ./nrf52840
 # Remove the old logs
-Remove-Item -Path ./logs -Force -Recurse
+Remove-Item -Path logs -Force -Recurse
 # Run embed (compile, flash & RTT logs)
 cargo embed
 # Go back

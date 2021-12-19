@@ -11,7 +11,7 @@ cortex-m-rt = "0.7.1"
 nrf52840-hal = { version = "0.14.0", features = ["rt"] }
 rtt-target = { version = "0.3.1", features = ["cortex-m"] }
 embedded-hal = "0.2.6"
-stackdump-capture = { path = "../../capture", features = ["cortex-m-fpu"] }
+stackdump-capture = { path = "../../capture" }
 
 [profile.release]
 debug = true

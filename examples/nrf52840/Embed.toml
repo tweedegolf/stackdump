@@ -31,4 +31,4 @@ show_timestamps = true
 # Whether to save rtt history buffer on exit.
 log_enabled = true
 # Where to save rtt history buffer relative to manifest path.
-log_path = "./logs"
+log_path = "logs"

@@ -5,7 +5,7 @@ use core::mem::MaybeUninit;
 use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
-use rtt_target::{rprintln, rtt_init, rtt_init_print, UpChannel};
+use rtt_target::{rprintln, rtt_init, UpChannel};
 use stackdump_capture::cortex_m::CortexMTarget;
 use stackdump_capture::stackdump_core::Stackdump;
 
@@ -108,6 +108,8 @@ fn TIMER0() {
 
         #[inline(never)]
         fn write_dump<const STACK_SIZE: usize>(dump: &mut Stackdump<CortexMTarget, STACK_SIZE>) {
+            rprintln!("{:2X?}", dump.registers);
+
             let mut buffer = [0; 1024];
             let mut dump_reader = dump.get_reader();
             while let Ok(bytes @ 1..) = dump_reader.read(&mut buffer) {

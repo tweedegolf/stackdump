@@ -1,6 +1,6 @@
 use crate::{Frame, FrameType, Trace};
 use addr2line::{
-    object::{File, Object, ObjectSection, ObjectSymbol, SectionKind},
+    object::{self, File, Object, ObjectSection, ObjectSymbol, SectionKind},
     Context,
 };
 use gimli::{
@@ -14,8 +14,19 @@ use stackdump_core::{
     Stackdump,
 };
 use std::{error::Error, ops::Range};
+use thiserror::Error;
 
 mod variables;
+
+#[derive(Error, Debug)]
+pub enum TraceError {
+    #[error("The elf file does not contain the required `{0}` section")]
+    MissingElfSection(String),
+    #[error("The elf file could not be read: {0}")]
+    ObjectReadError(#[from] object::Error),
+    #[error("An IO error occured: {0}")]
+    IOError(#[from] std::io::Error),
+}
 
 pub(self) const THUMB_BIT: u32 = 1;
 
@@ -35,12 +46,12 @@ impl<'data> UnwindingContext<'data> {
         elf: File<'data>,
         registers: CortexMRegisters,
         stack: Box<dyn MemoryRegion>,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, TraceError> {
         let addr2line_context = addr2line::Context::new(&elf).unwrap();
 
         let debug_info_sector_data = elf
             .section_by_name(".debug_frame")
-            .ok_or("Could not find .debug_frame section")?
+            .ok_or(TraceError::MissingElfSection(".debug_frame".into()))?
             .data()?;
         let mut debug_frame =
             addr2line::gimli::DebugFrame::new(debug_info_sector_data, LittleEndian);
@@ -48,7 +59,7 @@ impl<'data> UnwindingContext<'data> {
 
         let vector_table_section = elf
             .section_by_name(".vector_table")
-            .ok_or("Could not find .vector_table section")?;
+            .ok_or(TraceError::MissingElfSection(".vector_table".into()))?;
         let vector_table = vector_table_section
             .data()?
             .chunks_exact(4)
@@ -65,7 +76,7 @@ impl<'data> UnwindingContext<'data> {
             .unwrap_or(reset_vector_address..reset_vector_address);
         let text_section = elf
             .section_by_name(".text")
-            .ok_or("Could not find .text section")?;
+            .ok_or(TraceError::MissingElfSection(".text".into()))?;
         let text_address_range = (text_section.address() as u32)
             ..(text_section.address() as u32 + text_section.size() as u32);
 
@@ -99,7 +110,7 @@ impl<'data> UnwindingContext<'data> {
         })
     }
 
-    pub fn find_current_frames(&mut self, frames: &mut Vec<Frame>) -> Result<(), Box<dyn Error>> {
+    pub fn find_current_frames(&mut self, frames: &mut Vec<Frame>) -> Result<(), TraceError> {
         // Find the frames of the current register context
         let mut context_frames = self
             .addr2line_context
@@ -174,7 +185,10 @@ impl<'data> UnwindingContext<'data> {
         Ok(())
     }
 
-    pub fn try_unwind(&mut self, frames: &mut Vec<Frame>) -> Result<bool, Box<dyn Error>> {
+    /// Tries to unwind the stack.
+    ///
+    /// Returns the next frame and true if there are more frames or false if there are no more frames left
+    pub fn try_unwind(&mut self, last_frame: Option<&mut Frame>) -> (Option<Frame>, bool) {
         let unwind_info = self.debug_frame.unwind_info_for_address(
             &self.bases,
             &mut self.unwind_context,
@@ -185,12 +199,11 @@ impl<'data> UnwindingContext<'data> {
         let unwind_info = match unwind_info {
             Ok(unwind_info) => unwind_info.clone(),
             Err(_e) => {
-                frames.push(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
+                return (Some(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
                 1. compile the Rust code with `debug = 1` or higher. This is configured in the `profile.{{release,bench}}` sections of Cargo.toml (`profile.{{dev,test}}` default to `debug = 2`)
                 2. use a recent version of the `cortex-m` crates (e.g. cortex-m 0.6.3 or newer). Check versions in Cargo.lock
                 3. if linking to C code, compile the C code with the `-g` flag", self.registers.base.pc())),
-                    variables: Vec::new(), });
-                return Ok(false);
+                    variables: Vec::new(), }), false);
             }
         };
 
@@ -198,15 +211,17 @@ impl<'data> UnwindingContext<'data> {
         let stack_pointer_changed = match self.apply_unwind_info(unwind_info) {
             Ok(stack_pointer_changed) => stack_pointer_changed,
             Err(e) => {
-                frames.push(Frame {
-                    function: Some("Unknown".into()),
-                    file: None,
-                    line: None,
-                    column: None,
-                    frame_type: FrameType::Corrupted(e.to_string()),
-                    variables: Vec::new(),
-                });
-                return Ok(false);
+                return (
+                    Some(Frame {
+                        function: Some("Unknown".into()),
+                        file: None,
+                        line: None,
+                        column: None,
+                        frame_type: FrameType::Corrupted(e.to_string()),
+                        variables: Vec::new(),
+                    }),
+                    false,
+                );
             }
         };
 
@@ -219,17 +234,19 @@ impl<'data> UnwindingContext<'data> {
             // The stack pointer didn't change and our LR points to our current PC
             // If we unwound further we'd get the same frame again so we better stop
 
-            frames.push(Frame {
-                function: Some("Unknown".into()),
-                file: None,
-                line: None,
-                column: None,
-                frame_type: FrameType::Corrupted(
-                    "CFA did not change and LR and PC are equal".into(),
-                ),
-                variables: Vec::new(),
-            });
-            return Ok(false);
+            return (
+                Some(Frame {
+                    function: Some("Unknown".into()),
+                    file: None,
+                    line: None,
+                    column: None,
+                    frame_type: FrameType::Corrupted(
+                        "CFA did not change and LR and PC are equal".into(),
+                    ),
+                    variables: Vec::new(),
+                }),
+                false,
+            );
         }
 
         // Stack is not corrupted, but unwinding is not done
@@ -242,19 +259,46 @@ impl<'data> UnwindingContext<'data> {
                 0xFFFFFFF1 | 0xFFFFFFF9 | 0xFFFFFFFD => false,
                 0xFFFFFFE1 | 0xFFFFFFE9 | 0xFFFFFFED => true,
                 _ => {
-                    return Err(format!(
-                        "LR contains invalid EXC_RETURN value 0x{:08X}",
-                        *self.registers.base.lr()
-                    )
-                    .into())
+                    return (
+                        Some(Frame {
+                            function: Some("Unknown".into()),
+                            file: None,
+                            line: None,
+                            column: None,
+                            frame_type: FrameType::Corrupted(format!(
+                                "LR contains invalid EXC_RETURN value {:#10X}",
+                                *self.registers.base.lr()
+                            )),
+                            variables: Vec::new(),
+                        }),
+                        false,
+                    );
                 }
             };
 
-            if let Some(last_frame) = frames.last_mut() {
+            if let Some(last_frame) = last_frame {
                 last_frame.frame_type = FrameType::Exception;
             }
 
-            self.update_registers_with_exception_stack(fpu)?;
+            match self.update_registers_with_exception_stack(fpu) {
+                Ok(()) => {}
+                Err(address) => {
+                    return (
+                        Some(Frame {
+                            function: Some("Unknown".into()),
+                            file: None,
+                            line: None,
+                            column: None,
+                            frame_type: FrameType::Corrupted(format!(
+                                "Could not read address {:#10X} from the stack",
+                                address
+                            )),
+                            variables: Vec::new(),
+                        }),
+                        false,
+                    );
+                }
+            }
         } else {
             // No exception, so follow the LR back
             *self.registers.base.pc_mut() = *self.registers.base.lr();
@@ -266,18 +310,22 @@ impl<'data> UnwindingContext<'data> {
             .contains(self.registers.base.pc())
         {
             // Yes, let's make that a frame as well
-            frames.push(Frame {
-                function: Some("RESET".into()),
-                file: None,
-                line: None,
-                column: None,
-                frame_type: FrameType::Function,
-                variables: Vec::new(),
-            })
+            // We'll also make an assumption that there's no frames before reset
+            return (
+                Some(Frame {
+                    function: Some("RESET".into()),
+                    file: None,
+                    line: None,
+                    column: None,
+                    frame_type: FrameType::Function,
+                    variables: Vec::new(),
+                }),
+                false,
+            );
         }
 
         if self.is_last_frame() {
-            Ok(false)
+            (None, false)
         } else {
             // Is our stack pointer in a weird place?
             if self
@@ -285,7 +333,7 @@ impl<'data> UnwindingContext<'data> {
                 .read_u32(*self.registers.base.sp() as usize, RunTimeEndian::Little)
                 .is_none()
             {
-                frames.push(Frame {
+                (Some(Frame {
                     function: Some("Unknown".into()),
                     file: None,
                     line: None,
@@ -294,10 +342,9 @@ impl<'data> UnwindingContext<'data> {
                         format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", *self.registers.base.sp()),
                     ),
                     variables: Vec::new(),
-                });
-                Ok(false)
+                }), false)
             } else {
-                Ok(true)
+                (None, true)
             }
         }
     }
@@ -339,23 +386,21 @@ impl<'data> UnwindingContext<'data> {
 
     fn is_last_frame(&self) -> bool {
         *self.registers.base.lr() == 0
-            || self
-                .reset_vector_address_range
-                .contains(self.registers.base.pc())
             || (!self.text_address_range.contains(self.registers.base.pc())
                 && *self.registers.base.lr() <= 0xFFFF_FFE0)
     }
 
-    fn update_registers_with_exception_stack(&mut self, fpu: bool) -> Result<(), Box<dyn Error>> {
+    /// Assumes we are at an exception point in the stack unwinding.
+    /// Reads the registers that were stored on the stack and updates our current register representation with it.
+    ///
+    /// Returns Ok if everything went fine or an error with an address if the stack could not be read
+    fn update_registers_with_exception_stack(&mut self, fpu: bool) -> Result<(), usize> {
         let current_sp = *self.registers.base.sp();
 
         let read_stack_var = |index: usize| {
             self.device_memory
                 .read_u32(current_sp as usize + index * 4, RunTimeEndian::Little)
-                .ok_or(format!(
-                    "Address {:#10X} out of range",
-                    current_sp as usize + index * 4
-                ))
+                .ok_or(current_sp as usize + index * 4)
         };
         *self.registers.base.register_mut(0) = read_stack_var(0)?;
         *self.registers.base.register_mut(1) = read_stack_var(1)?;
@@ -394,11 +439,13 @@ impl<'data> UnwindingContext<'data> {
 }
 
 impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
-    fn trace(&self, elf_data: &[u8]) -> Result<Vec<crate::Frame>, Box<dyn Error>> {
+    type Error = TraceError;
+
+    fn trace(&self, elf_data: &[u8]) -> Result<Vec<crate::Frame>, Self::Error> {
         let mut frames = Vec::new();
 
-        // Get the elf file context
         let elf = addr2line::object::File::parse(elf_data).unwrap();
+        // Get the elf file context
         let mut context =
             UnwindingContext::create(elf, self.registers.clone(), Box::new(self.stack.clone()))?;
 
@@ -408,7 +455,14 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
             // println!("{:02X?}", context.registers);
 
             context.find_current_frames(&mut frames)?;
-            if !context.try_unwind(&mut frames)? {
+
+            let (unwind_frame, unwinding_left) = context.try_unwind(frames.last_mut());
+
+            if let Some(unwind_frame) = unwind_frame {
+                frames.push(unwind_frame);
+            }
+
+            if !unwinding_left {
                 break;
             }
         }

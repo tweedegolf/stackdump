@@ -23,7 +23,7 @@ pub trait MemoryRegion {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
 pub struct ArrayVecMemoryRegion<const SIZE: usize> {
     pub start_address: u64,
     pub data: ArrayVec<u8, SIZE>,
@@ -55,7 +55,7 @@ impl<const SIZE: usize> MemoryRegion for ArrayVecMemoryRegion<SIZE> {
 }
 
 #[cfg(feature = "std")]
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
 pub struct VecMemoryRegion {
     pub start_address: u64,
     pub data: Vec<u8>,

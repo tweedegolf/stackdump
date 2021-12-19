@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub mod device_memory;
 pub mod memory_region;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct Stackdump<T, const STACK_SIZE: usize>
 where
     T: Target,
@@ -37,7 +37,10 @@ where
     }
 
     pub fn get_reader<'s>(&'s self) -> StackdumpReader<'s, T, STACK_SIZE> {
-        StackdumpReader { stackdump: self, bytes_read: 0 }
+        StackdumpReader {
+            stackdump: self,
+            bytes_read: 0,
+        }
     }
 }
 
@@ -131,24 +134,6 @@ where
     }
 }
 
-#[cfg(feature = "fuzzer")]
-impl<'a, T, const STACK_SIZE: usize> arbitrary::Arbitrary<'a> for Stackdump<T, STACK_SIZE>
-where
-    T: Target,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        TryFrom::try_from(u.bytes(u.len())?).map_err(|_| arbitrary::Error::IncorrectFormat)
-    }
-
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let _ = depth;
-        (
-            T::Registers::min_data_size(),
-            Some(T::Registers::min_data_size() + 8 + STACK_SIZE),
-        )
-    }
-}
-
 pub trait Target: Debug + DeserializeOwned + Serialize {
     type Registers: RegisterContainer;
     fn capture<const STACK_SIZE: usize>(target: &mut Stackdump<Self, STACK_SIZE>)
@@ -166,4 +151,59 @@ pub trait RegisterContainer: Default + Debug + DeserializeOwned + Serialize + Cl
 
     /// Try to get the registers container from a slice
     fn try_from(data: &[u8]) -> Result<Self, ()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use super::*;
+
+    #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+    struct TestRegisters(u8);
+    impl RegisterContainer for TestRegisters {
+        const DATA_SIZE: usize = 1;
+
+        fn read(&self, offset: usize, buf: &mut [u8]) {
+            if offset != 0 || buf.len() == 0 {
+                panic!();
+            }
+
+            buf[0] = self.0
+        }
+
+        fn try_from(data: &[u8]) -> Result<Self, ()> {
+            data.get(0).map(|v| TestRegisters(*v)).ok_or(())
+        }
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct TestTarget {}
+    impl Target for TestTarget {
+        type Registers = TestRegisters;
+
+        fn capture<const STACK_SIZE: usize>(_target: &mut Stackdump<Self, STACK_SIZE>)
+        where
+            Self: Sized,
+        {
+            todo!()
+        }
+    }
+
+    #[test]
+    fn stackdump_reader() {
+        let mut stackdump: Stackdump<TestTarget, 2048> = Stackdump::new();
+
+        stackdump.registers.0 = 55;
+        stackdump.stack.start_address = 12345;
+        stackdump.stack.data.try_extend_from_slice(&[0,1,2,3,4,5,6,7,8,9,1,2,3,4,5,6,7,8,9]).unwrap();
+
+        let mut buffer = Vec::new();
+        let mut reader = stackdump.get_reader();
+        reader.read_to_end(&mut buffer).unwrap();
+
+        let new_stackdump = Stackdump::<TestTarget, 2048>::try_from(dbg!(buffer).as_slice()).unwrap();
+
+        assert_eq!(stackdump, new_stackdump);
+    }
 }

@@ -1,9 +1,9 @@
-pub mod cortex_m;
-
-use std::{error::Error, fmt::Display};
+use std::fmt::Display;
 
 pub use stackdump_capture;
 pub use stackdump_core;
+
+pub mod cortex_m;
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -192,5 +192,6 @@ pub struct Enumerator {
 }
 
 pub trait Trace {
-    fn trace(&self, elf_data: &[u8]) -> Result<Vec<Frame>, Box<dyn Error>>;
+    type Error;
+    fn trace(&self, elf_data: &[u8]) -> Result<Vec<Frame>, Self::Error>;
 }

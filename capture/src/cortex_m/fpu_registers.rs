@@ -10,7 +10,7 @@ impl Default for CortexMFpuRegisters {
 }
 
 impl CortexMFpuRegisters {
-    #[cfg(feature = "capture")]
+    #[cfg(all(feature = "capture", cortex_m, has_fpu))]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
         use core::arch::asm;

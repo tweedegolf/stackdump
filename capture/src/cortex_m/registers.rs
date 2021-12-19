@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
 pub struct CortexMBaseRegisters([u32; 16]);
 
 impl core::fmt::Debug for CortexMBaseRegisters {
@@ -28,7 +27,7 @@ impl core::fmt::Debug for CortexMBaseRegisters {
 }
 
 impl CortexMBaseRegisters {
-    #[cfg(feature = "capture")]
+    #[cfg(all(feature = "capture", cortex_m))]
     #[inline(always)]
     pub(crate) fn capture(&mut self) {
         use core::arch::asm;

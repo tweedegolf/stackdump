@@ -1,5 +1,0 @@
-{
-    "rust-analyzer.cargo.features": [
-        "stackdump-capture/cortex-m-fpu"
-    ],
-}
