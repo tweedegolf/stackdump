@@ -196,13 +196,18 @@ mod tests {
 
         stackdump.registers.0 = 55;
         stackdump.stack.start_address = 12345;
-        stackdump.stack.data.try_extend_from_slice(&[0,1,2,3,4,5,6,7,8,9,1,2,3,4,5,6,7,8,9]).unwrap();
+        stackdump
+            .stack
+            .data
+            .try_extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            .unwrap();
 
         let mut buffer = Vec::new();
         let mut reader = stackdump.get_reader();
         reader.read_to_end(&mut buffer).unwrap();
 
-        let new_stackdump = Stackdump::<TestTarget, 2048>::try_from(dbg!(buffer).as_slice()).unwrap();
+        let new_stackdump =
+            Stackdump::<TestTarget, 2048>::try_from(dbg!(buffer).as_slice()).unwrap();
 
         assert_eq!(stackdump, new_stackdump);
     }

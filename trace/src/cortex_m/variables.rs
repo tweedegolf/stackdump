@@ -1,4 +1,7 @@
-use crate::{Enumerator, StructureMember, TemplateTypeParam, Variable, VariableType};
+use crate::{
+    gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
+    Enumerator, StructureMember, TemplateTypeParam, Variable, VariableType,
+};
 use addr2line::Context;
 use bitvec::prelude::*;
 use gimli::{
@@ -9,50 +12,41 @@ use stackdump_capture::cortex_m::CortexMRegisters;
 use stackdump_core::device_memory::DeviceMemory;
 use std::{ops::Deref, rc::Rc};
 
+use super::TraceError;
+
 fn get_entry_name(
     context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-) -> Option<String> {
-    entry
-        // Find the attribute
-        .attr(gimli::constants::DW_AT_name)
-        .ok()
-        .flatten()
-        // Read as a string type
-        .map(|name| context.dwarf().attr_string(unit, name.value()).ok())
-        .flatten()
-        // Convert to String
-        .map(|name| name.to_string().map(|name| name.to_string()).ok())
-        .flatten()
+) -> Result<String, TraceError> {
+    // Find the attribute
+    let name_attr = entry.required_attr(gimli::constants::DW_AT_name)?;
+    // Read as a string type
+    let attr_string = context.dwarf().attr_string(unit, name_attr.value())?;
+    // Convert to String
+    Ok(attr_string.to_string()?.into())
 }
 
 fn get_entry_type_reference_tree<'abbrev, 'unit>(
     unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     abbreviations: &'abbrev Abbreviations,
     entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-) -> Option<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>> {
-    entry
-        // Find the attribute
-        .attr(gimli::constants::DW_AT_type)
-        .ok()
-        .flatten()
-        // Check its offset
-        .map(|v_type| {
-            if let AttributeValue::UnitRef(offset) = v_type.value() {
-                Some(offset)
-            } else {
-                None
-            }
+) -> Result<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>, TraceError> {
+    // Find the attribute
+    let type_attr = entry.required_attr(gimli::constants::DW_AT_type)?;
+
+    // Check its offset
+    let type_offset = if let AttributeValue::UnitRef(offset) = type_attr.value() {
+        Ok(offset)
+    } else {
+        Err(TraceError::WrongAttributeValueType {
+            attribute_name: type_attr.name().to_string(),
+            value_type_name: "UnitRef",
         })
-        .flatten()
-        // Get the entries for the type
-        .map(|type_offset| {
-            unit.header
-                .entries_tree(abbreviations, Some(type_offset))
-                .ok()
-        })
-        .flatten()
+    }?;
+
+    // Get the entries for the type
+    Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
 }
 
 fn find_type(
@@ -60,63 +54,57 @@ fn find_type(
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-) -> Option<VariableType> {
+) -> Result<VariableType, TraceError> {
     let entry = node.entry();
+    let entry_tag = entry.tag().to_string();
 
     match entry.tag() {
         tag if tag == gimli::constants::DW_TAG_structure_type
             || tag == gimli::constants::DW_TAG_union_type
             || tag == gimli::constants::DW_TAG_class_type =>
         {
-            let type_name = get_entry_name(context, unit, entry).unwrap();
+            let type_name = get_entry_name(context, unit, entry)?;
             let mut members = Vec::new();
             let mut type_params = Vec::new();
             let byte_size = entry
-                .attr_value(gimli::constants::DW_AT_byte_size)
-                .unwrap()
-                .unwrap()
-                .udata_value()
-                .unwrap();
+                .required_attr(gimli::constants::DW_AT_byte_size)?
+                .required_udata_value()?;
 
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
                 let member_entry = child.entry();
 
                 let member_name = match get_entry_name(context, unit, member_entry) {
-                    Some(member_name) => member_name,
-                    None => continue, // Only care about named members for now
+                    Ok(member_name) => member_name,
+                    Err(_) => continue, // Only care about named members for now
                 };
 
-                let member_type = || get_entry_type_reference_tree(unit, abbreviations, member_entry)
-                    .map(|mut type_tree| {
-                        type_tree
-                            .root()
-                            .map(|root| find_type(context, unit, abbreviations, root))
-                            .ok()
-                    })
-                    .flatten()
-                    .flatten()
-                    .unwrap();
+                let member_type = || {
+                    get_entry_type_reference_tree(unit, abbreviations, member_entry).map(
+                        |mut type_tree| {
+                            type_tree
+                                .root()
+                                .map(|root| find_type(context, unit, abbreviations, root))
+                        },
+                    )??
+                };
 
                 match member_entry.tag() {
                     gimli::constants::DW_TAG_member => {
                         let member_location = member_entry
-                            .attr_value(gimli::constants::DW_AT_data_member_location)
-                            .unwrap()
-                            .unwrap()
-                            .udata_value()
-                            .unwrap();
+                            .required_attr(gimli::constants::DW_AT_data_member_location)?
+                            .required_udata_value()?;
 
                         members.push(StructureMember {
                             name: member_name,
-                            member_type: member_type(),
+                            member_type: member_type()?,
                             member_location,
                         });
                     }
                     gimli::constants::DW_TAG_template_type_parameter => {
                         type_params.push(TemplateTypeParam {
                             name: member_name,
-                            template_type: member_type(),
+                            template_type: member_type()?,
                         })
                     }
                     gimli::constants::DW_TAG_subprogram => {} // Ignore
@@ -130,19 +118,19 @@ fn find_type(
             }
 
             match tag {
-                gimli::constants::DW_TAG_structure_type => Some(VariableType::Structure {
+                gimli::constants::DW_TAG_structure_type => Ok(VariableType::Structure {
                     type_name,
                     type_params,
                     members,
                     byte_size,
                 }),
-                gimli::constants::DW_TAG_union_type => Some(VariableType::Union {
+                gimli::constants::DW_TAG_union_type => Ok(VariableType::Union {
                     type_name,
                     type_params,
                     members,
                     byte_size,
                 }),
-                gimli::constants::DW_TAG_class_type => Some(VariableType::Class {
+                gimli::constants::DW_TAG_class_type => Ok(VariableType::Class {
                     type_name,
                     type_params,
                     members,
@@ -152,112 +140,96 @@ fn find_type(
             }
         }
         gimli::constants::DW_TAG_base_type => {
-            let name = get_entry_name(context, unit, entry).unwrap();
-            let encoding = entry
-                .attr(gimli::constants::DW_AT_encoding)
-                .unwrap()
-                .map(|attr| {
-                    if let AttributeValue::Encoding(encoding) = attr.value() {
-                        Some(encoding)
-                    } else {
-                        None
-                    }
-                })
-                .flatten()
-                .unwrap();
+            let name = get_entry_name(context, unit, entry)?;
+            let encoding =
+                entry
+                    .required_attr(gimli::constants::DW_AT_encoding)
+                    .map(|attr| {
+                        if let AttributeValue::Encoding(encoding) = attr.value() {
+                            Ok(encoding)
+                        } else {
+                            Err(TraceError::WrongAttributeValueType {
+                                attribute_name: attr.name().to_string(),
+                                value_type_name: "Encoding",
+                            })
+                        }
+                    })??;
             let byte_size = entry
-                .attr(gimli::constants::DW_AT_byte_size)
-                .unwrap()
-                .unwrap()
-                .value()
-                .udata_value()
-                .unwrap();
+                .required_attr(gimli::constants::DW_AT_byte_size)?
+                .required_udata_value()?;
 
-            Some(VariableType::BaseType {
+            Ok(VariableType::BaseType {
                 name,
                 encoding,
                 byte_size,
             })
         }
         gimli::constants::DW_TAG_pointer_type => {
-            let name = get_entry_name(context, unit, entry).unwrap();
-            let pointee_type = get_entry_type_reference_tree(unit, abbreviations, entry)
-                .map(|mut type_tree| {
+            let name = get_entry_name(context, unit, entry)?;
+            let pointee_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
+                |mut type_tree| {
                     type_tree
                         .root()
                         .map(|root| find_type(context, unit, abbreviations, root))
-                        .ok()
-                })
-                .flatten()
-                .flatten()
-                .unwrap();
+                },
+            )???;
 
-            Some(VariableType::PointerType {
+            Ok(VariableType::PointerType {
                 name,
                 pointee_type: Box::new(pointee_type),
             })
         }
         gimli::constants::DW_TAG_array_type => {
-            let array_type = get_entry_type_reference_tree(unit, abbreviations, entry)
-                .map(|mut type_tree| {
+            let array_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
+                |mut type_tree| {
                     type_tree
                         .root()
                         .map(|root| find_type(context, unit, abbreviations, root))
-                        .ok()
-                })
-                .flatten()
-                .flatten()
-                .unwrap();
+                },
+            )???;
 
             let byte_size = entry
-                .attr(gimli::constants::DW_AT_byte_size)
-                .unwrap()
-                .map(|byte_size| byte_size.value().udata_value())
-                .flatten();
+                .required_attr(gimli::constants::DW_AT_byte_size)?
+                .udata_value();
 
             let mut children = node.children();
-            let child = children.next().unwrap().unwrap();
+            let child = children
+                .next()?
+                .ok_or_else(|| TraceError::ExpectedChildNotPresent { entry_tag })?;
             let child_entry = child.entry();
 
             let lower_bound = child_entry
-                .attr(gimli::constants::DW_AT_lower_bound)
-                .unwrap()
-                .unwrap()
+                .required_attr(gimli::constants::DW_AT_lower_bound)?
                 .sdata_value()
                 .unwrap_or(0);
             let count = child_entry
-                .attr(gimli::constants::DW_AT_count)
-                .ok()
-                .flatten()
+                .attr(gimli::constants::DW_AT_count)?
                 .map(|value| value.udata_value())
                 .flatten();
             let upper_bound = child_entry
-                .attr(gimli::constants::DW_AT_upper_bound)
-                .ok()
-                .flatten()
-                .map(|value| value.sdata_value())
-                .flatten();
+                .required_attr(gimli::constants::DW_AT_upper_bound)?
+                .required_sdata_value();
 
-            Some(VariableType::ArrayType {
+            let count = match count {
+                Some(count) => count,
+                None => (upper_bound? - lower_bound).try_into().unwrap(),
+            };
+
+            Ok(VariableType::ArrayType {
                 array_type: Box::new(array_type),
                 lower_bound,
-                count: count
-                    .unwrap_or_else(|| (upper_bound.unwrap() - lower_bound).try_into().unwrap()),
+                count,
                 byte_size,
             })
         }
         gimli::constants::DW_TAG_enumeration_type => {
-            let name = get_entry_name(context, unit, entry).unwrap();
+            let name = get_entry_name(context, unit, entry)?;
             let underlying_type = get_entry_type_reference_tree(unit, abbreviations, entry)
                 .map(|mut type_tree| {
-                    type_tree
-                        .root()
-                        .map(|root| find_type(context, unit, abbreviations, root))
-                        .ok()
-                })
-                .flatten()
-                .flatten()
-                .unwrap();
+                type_tree
+                    .root()
+                    .map(|root| find_type(context, unit, abbreviations, root))
+            })???;
 
             let mut enumerators = Vec::new();
 
@@ -270,14 +242,10 @@ fn find_type(
                     continue;
                 }
 
-                let enumerator_name = get_entry_name(context, unit, enumerator_entry).unwrap();
+                let enumerator_name = get_entry_name(context, unit, enumerator_entry)?;
                 let const_value = enumerator_entry
-                    .attr(gimli::constants::DW_AT_const_value)
-                    .unwrap()
-                    .unwrap()
-                    .value()
-                    .sdata_value()
-                    .unwrap();
+                    .required_attr(gimli::constants::DW_AT_const_value)?
+                    .required_sdata_value()?;
 
                 enumerators.push(Enumerator {
                     name: enumerator_name,
@@ -285,20 +253,16 @@ fn find_type(
                 });
             }
 
-            Some(VariableType::EnumerationType {
+            Ok(VariableType::EnumerationType {
                 name,
                 underlying_type: Box::new(underlying_type),
                 enumerators,
             })
         }
-        gimli::constants::DW_TAG_subroutine_type => Some(VariableType::Subroutine),
-        tag => {
-            eprintln!(
-                "Variable type not implement yet: {}",
-                tag.static_string().unwrap()
-            );
-            None
-        }
+        gimli::constants::DW_TAG_subroutine_type => Ok(VariableType::Subroutine),
+        tag => Err(TraceError::TypeNotImplemented {
+            type_name: tag.to_string(),
+        }),
     }
 }
 
@@ -308,16 +272,17 @@ fn evaluate_location(
     registers: &CortexMRegisters,
     location: Option<Attribute<EndianReader<RunTimeEndian, Rc<[u8]>>>>,
     frame_base: Option<u32>,
-) -> VariableLocationResult {
+) -> Result<VariableLocationResult, TraceError> {
     let location = match location {
         Some(location) => location.value(),
-        None => return VariableLocationResult::NoLocationAttribute,
+        None => return Ok(VariableLocationResult::NoLocationAttribute),
     };
 
     let location_expression = match location {
-        AttributeValue::Exprloc(_) | AttributeValue::Block(_) => location.exprloc_value().unwrap(),
+        AttributeValue::Block(ref data) => gimli::Expression(data.clone()),
+        AttributeValue::Exprloc(ref data) => data.clone(),
         AttributeValue::LocationListsRef(l) => {
-            let mut locations = context.dwarf().locations(unit, l).unwrap();
+            let mut locations = context.dwarf().locations(unit, l)?;
             let mut location = None;
 
             while let Ok(Some(maybe_location)) = locations.next() {
@@ -333,7 +298,7 @@ fn evaluate_location(
             if let Some(location) = location {
                 location.data
             } else {
-                return VariableLocationResult::LocationListNotFound;
+                return Ok(VariableLocationResult::LocationListNotFound);
             }
         }
         _ => unreachable!(),
@@ -341,7 +306,7 @@ fn evaluate_location(
 
     let mut location_evaluation = location_expression.evaluation(unit.encoding());
 
-    let mut result = location_evaluation.evaluate().unwrap();
+    let mut result = location_evaluation.evaluate()?;
     while result != EvaluationResult::Complete {
         match result {
             EvaluationResult::RequiresRegister {
@@ -349,24 +314,22 @@ fn evaluate_location(
                 base_type: _,
             } => {
                 let value = registers.base.register(register.0 as usize);
-                result = location_evaluation
-                    .resume_with_register(gimli::Value::U32(*value))
-                    .unwrap();
+                result = location_evaluation.resume_with_register(gimli::Value::U32(*value))?;
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
-                result = location_evaluation
-                    .resume_with_frame_base(frame_base.unwrap() as u64)
-                    .unwrap();
+                result = location_evaluation.resume_with_frame_base(
+                    frame_base.ok_or_else(|| TraceError::UnknownFrameBase)? as u64,
+                )?;
             }
-            r => return VariableLocationResult::LocationEvaluationStepNotImplemented(r),
+            r => return Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(r)),
         }
     }
 
     let result = location_evaluation.result();
 
     match result.len() {
-        0 => VariableLocationResult::NoLocationFound,
-        _ => VariableLocationResult::LocationsFound(result),
+        0 => Ok(VariableLocationResult::NoLocationFound),
+        _ => Ok(VariableLocationResult::LocationsFound(result)),
     }
 }
 
@@ -404,7 +367,7 @@ fn get_piece_data(
             }
             _ => unreachable!(
                 "Register {} is not available",
-                gimli::Arm::register_name(register).unwrap()
+                gimli::Arm::register_name(register).unwrap_or("UNKNOWN")
             ),
         },
         gimli::Location::Address { address } => device_memory
@@ -490,6 +453,10 @@ fn get_variable_data(
     }
 }
 
+/// Gets a string representation of the variable
+///
+/// If it can be read, an Ok with the most literal value format is returned.
+/// If it can not be read, an Err is returned with a user displayable error.
 fn read_variable(
     variable_type: &VariableType,
     data: &BitSlice<Lsb0, u8>,
@@ -539,7 +506,7 @@ fn read_variable(
             gimli::constants::DW_ATE_boolean => Ok(format!("{}", data.iter().any(|v| *v))),
             t => Err(format!(
                 "Unimplemented BaseType encoding {} - data: {:X?}",
-                t.static_string().unwrap(),
+                t.to_string(),
                 data
             )),
         }
@@ -656,16 +623,16 @@ pub fn find_variables(
     node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     variables: &mut Vec<Variable>,
     mut frame_base: Option<u32>,
-) {
+) -> Result<(), TraceError> {
     let entry = node.entry();
 
     let frame_base_location = evaluate_location(
         context,
         unit,
         registers,
-        entry.attr(gimli::constants::DW_AT_frame_base).unwrap(),
+        entry.attr(gimli::constants::DW_AT_frame_base)?,
         frame_base,
-    );
+    )?;
     let frame_base_data = get_variable_data(
         device_memory,
         registers,
@@ -687,40 +654,34 @@ pub fn find_variables(
         // Get the name of the variable
         let mut variable_name = get_entry_name(context, unit, entry);
 
-        if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_none() {
-            variable_name = Some("param".into());
+        if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
+            variable_name = Ok("param".into());
         }
 
         // Get the type of the variable
-        let variable_type = get_entry_type_reference_tree(unit, abbreviations, entry)
-            .map(|mut type_tree| {
-                type_tree
-                    .root()
-                    .map(|root| find_type(context, unit, abbreviations, root))
-                    .ok()
-            })
-            .flatten()
-            .flatten();
+        let variable_type =
+            get_entry_type_reference_tree(unit, abbreviations, entry).and_then(|mut type_tree| {
+                let type_root = type_tree.root()?;
+                find_type(context, unit, abbreviations, type_root)
+            });
 
         match (variable_name, variable_type) {
-            (Some(variable_name), Some(variable_type))
-                if variable_type.get_variable_size() == 0 =>
-            {
+            (Ok(variable_name), Ok(variable_type)) if variable_type.get_variable_size() == 0 => {
                 variables.push(Variable {
                     name: variable_name,
                     value: Ok("{ (ZST) }".into()),
                     variable_type,
                 })
             }
-            (Some(variable_name), Some(variable_type)) => {
+            (Ok(variable_name), Ok(variable_type)) => {
                 // Get the location of the variable
                 let variable_location = evaluate_location(
                     context,
                     unit,
                     registers,
-                    entry.attr(gimli::constants::DW_AT_location).unwrap(),
+                    entry.attr(gimli::constants::DW_AT_location)?,
                     frame_base,
-                );
+                )?;
 
                 let variable_data =
                     get_variable_data(device_memory, registers, &variable_type, variable_location);
@@ -737,12 +698,20 @@ pub fn find_variables(
                     variable_type,
                 })
             }
-            _ => {}
+            (Ok(variable_name), Err(type_error)) => {
+                println!(
+                    "Could not read the type of variable `{}`: {:?}",
+                    variable_name, type_error
+                );
+            }
+            (Err(name_error), _) => {
+                println!("Could not get the name of a variable: {:?}", name_error);
+            }
         }
     }
 
     let mut children = node.children();
-    while let Ok(Some(child)) = children.next() {
+    while let Some(child) = children.next()? {
         find_variables(
             context,
             unit,
@@ -752,8 +721,10 @@ pub fn find_variables(
             child,
             variables,
             frame_base,
-        );
+        )?;
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]

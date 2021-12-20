@@ -4,6 +4,7 @@ pub use stackdump_capture;
 pub use stackdump_core;
 
 pub mod cortex_m;
+mod gimli_extensions;
 
 #[derive(Debug, Clone)]
 pub struct Frame {

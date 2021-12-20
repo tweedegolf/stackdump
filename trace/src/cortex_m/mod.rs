@@ -26,6 +26,26 @@ pub enum TraceError {
     ObjectReadError(#[from] object::Error),
     #[error("An IO error occured: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("Some debug information could not be parsed: {0}")]
+    DebugParseError(#[from] gimli::Error),
+    #[error("An entry ({entry_tag}) is missing an expected attribute: {attribute_name}")]
+    MissingAttribute {
+        entry_tag: String,
+        attribute_name: String,
+    },
+    #[error("An attribute ({attribute_name}) has the wrong value type: {value_type_name}")]
+    WrongAttributeValueType {
+        attribute_name: String,
+        value_type_name: &'static str,
+    },
+    #[error("The type `{type_name}` has not been implemented yet")]
+    TypeNotImplemented { type_name: String },
+    #[error("A child was expected for {entry_tag}, but it was not there")]
+    ExpectedChildNotPresent { entry_tag: String },
+    #[error("The frame base is not known yet")]
+    UnknownFrameBase,
+    #[error("The dwarf unit for a `pc` of {pc:#X} could not be found")]
+    DwarfUnitNotFound { pc: u64 },
 }
 
 pub(self) const THUMB_BIT: u32 = 1;
@@ -47,7 +67,7 @@ impl<'data> UnwindingContext<'data> {
         registers: CortexMRegisters,
         stack: Box<dyn MemoryRegion>,
     ) -> Result<Self, TraceError> {
-        let addr2line_context = addr2line::Context::new(&elf).unwrap();
+        let addr2line_context = addr2line::Context::new(&elf)?;
 
         let debug_info_sector_data = elf
             .section_by_name(".debug_frame")
@@ -86,17 +106,15 @@ impl<'data> UnwindingContext<'data> {
         let mut device_memory = DeviceMemory::new();
         device_memory.add_memory_region_boxed(stack);
 
-        elf.sections()
-            .filter(|section| match section.kind() {
-                SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => true,
-                _ => false,
-            })
-            .for_each(|section| {
-                device_memory.add_memory_region(VecMemoryRegion::new(
-                    section.address(),
-                    section.uncompressed_data().unwrap().to_vec(),
-                ));
-            });
+        for section in elf.sections().filter(|section| match section.kind() {
+            SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => true,
+            _ => false,
+        }) {
+            device_memory.add_memory_region(VecMemoryRegion::new(
+                section.address(),
+                section.uncompressed_data()?.to_vec(),
+            ));
+        }
 
         Ok(Self {
             debug_frame,
@@ -114,25 +132,22 @@ impl<'data> UnwindingContext<'data> {
         // Find the frames of the current register context
         let mut context_frames = self
             .addr2line_context
-            .find_frames(*self.registers.base.pc() as u64)
-            .unwrap();
+            .find_frames(*self.registers.base.pc() as u64)?;
 
         // Get the debug compilation unit of the current register context
         let unit = self
             .addr2line_context
             .find_dwarf_unit(*self.registers.base.pc() as u64)
-            .unwrap();
+            .ok_or_else(|| TraceError::DwarfUnitNotFound {
+                pc: *self.registers.base.pc() as u64,
+            })?;
 
         // Get the abbreviations of the unit
-        let abbreviations = self
-            .addr2line_context
-            .dwarf()
-            .abbreviations(&unit.header)
-            .unwrap();
+        let abbreviations = self.addr2line_context.dwarf().abbreviations(&unit.header)?;
 
         // Loop through the found frames and add them
         let mut added_frames = 0;
-        while let Some(context_frame) = context_frames.next().unwrap() {
+        while let Some(context_frame) = context_frames.next()? {
             let (file, line, column) = context_frame
                 .location
                 .map(|l| (l.file.map(|f| f.to_string()), l.line, l.column))
@@ -158,7 +173,7 @@ impl<'data> UnwindingContext<'data> {
                         entry_root,
                         &mut variables,
                         None,
-                    );
+                    )?;
                 }
             }
 
@@ -444,7 +459,7 @@ impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
     fn trace(&self, elf_data: &[u8]) -> Result<Vec<crate::Frame>, Self::Error> {
         let mut frames = Vec::new();
 
-        let elf = addr2line::object::File::parse(elf_data).unwrap();
+        let elf = addr2line::object::File::parse(elf_data)?;
         // Get the elf file context
         let mut context =
             UnwindingContext::create(elf, self.registers.clone(), Box::new(self.stack.clone()))?;
