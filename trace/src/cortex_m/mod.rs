@@ -28,8 +28,9 @@ pub enum TraceError {
     IOError(#[from] std::io::Error),
     #[error("Some debug information could not be parsed: {0}")]
     DebugParseError(#[from] gimli::Error),
-    #[error("An entry ({entry_tag}) is missing an expected attribute: {attribute_name}")]
+    #[error("An entry ({entry_tag} (@ .debug_info offset {entry_debug_info_offset:X?})) is missing an expected attribute: {attribute_name}")]
     MissingAttribute {
+        entry_debug_info_offset: Option<u64>,
         entry_tag: String,
         attribute_name: String,
     },
@@ -46,6 +47,8 @@ pub enum TraceError {
     UnknownFrameBase,
     #[error("The dwarf unit for a `pc` of {pc:#X} could not be found")]
     DwarfUnitNotFound { pc: u64 },
+    #[error("A number could not be converted to another type")]
+    NumberConversionError,
 }
 
 pub(self) const THUMB_BIT: u32 = 1;
@@ -495,6 +498,8 @@ mod tests {
 
     #[test]
     fn example_dump() {
+        simple_logger::SimpleLogger::new().with_level(log::LevelFilter::Debug).init().unwrap();
+
         let stackdump: Stackdump<CortexMTarget, 2048> = Stackdump::try_from(DUMP).unwrap();
         let frames = stackdump.trace(ELF).unwrap();
         for (i, frame) in frames.iter().enumerate() {

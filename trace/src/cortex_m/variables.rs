@@ -20,7 +20,7 @@ fn get_entry_name(
     entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
 ) -> Result<String, TraceError> {
     // Find the attribute
-    let name_attr = entry.required_attr(gimli::constants::DW_AT_name)?;
+    let name_attr = entry.required_attr(unit, gimli::constants::DW_AT_name)?;
     // Read as a string type
     let attr_string = context.dwarf().attr_string(unit, name_attr.value())?;
     // Convert to String
@@ -33,7 +33,7 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
     entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
 ) -> Result<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>, TraceError> {
     // Find the attribute
-    let type_attr = entry.required_attr(gimli::constants::DW_AT_type)?;
+    let type_attr = entry.required_attr(unit, gimli::constants::DW_AT_type)?;
 
     // Check its offset
     let type_offset = if let AttributeValue::UnitRef(offset) = type_attr.value() {
@@ -67,7 +67,7 @@ fn find_type(
             let mut members = Vec::new();
             let mut type_params = Vec::new();
             let byte_size = entry
-                .required_attr(gimli::constants::DW_AT_byte_size)?
+                .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
             let mut children = node.children();
@@ -92,7 +92,7 @@ fn find_type(
                 match member_entry.tag() {
                     gimli::constants::DW_TAG_member => {
                         let member_location = member_entry
-                            .required_attr(gimli::constants::DW_AT_data_member_location)?
+                            .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
                             .required_udata_value()?;
 
                         members.push(StructureMember {
@@ -141,21 +141,20 @@ fn find_type(
         }
         gimli::constants::DW_TAG_base_type => {
             let name = get_entry_name(context, unit, entry)?;
-            let encoding =
-                entry
-                    .required_attr(gimli::constants::DW_AT_encoding)
-                    .map(|attr| {
-                        if let AttributeValue::Encoding(encoding) = attr.value() {
-                            Ok(encoding)
-                        } else {
-                            Err(TraceError::WrongAttributeValueType {
-                                attribute_name: attr.name().to_string(),
-                                value_type_name: "Encoding",
-                            })
-                        }
-                    })??;
+            let encoding = entry
+                .required_attr(unit, gimli::constants::DW_AT_encoding)
+                .map(|attr| {
+                    if let AttributeValue::Encoding(encoding) = attr.value() {
+                        Ok(encoding)
+                    } else {
+                        Err(TraceError::WrongAttributeValueType {
+                            attribute_name: attr.name().to_string(),
+                            value_type_name: "Encoding",
+                        })
+                    }
+                })??;
             let byte_size = entry
-                .required_attr(gimli::constants::DW_AT_byte_size)?
+                .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
             Ok(VariableType::BaseType {
@@ -189,8 +188,9 @@ fn find_type(
             )???;
 
             let byte_size = entry
-                .required_attr(gimli::constants::DW_AT_byte_size)?
-                .udata_value();
+                .attr(gimli::constants::DW_AT_byte_size)?
+                .map(|bsize| bsize.udata_value())
+                .flatten();
 
             let mut children = node.children();
             let child = children
@@ -199,21 +199,26 @@ fn find_type(
             let child_entry = child.entry();
 
             let lower_bound = child_entry
-                .required_attr(gimli::constants::DW_AT_lower_bound)?
+                .required_attr(unit, gimli::constants::DW_AT_lower_bound)?
                 .sdata_value()
                 .unwrap_or(0);
-            let count = child_entry
-                .attr(gimli::constants::DW_AT_count)?
-                .map(|value| value.udata_value())
-                .flatten();
-            let upper_bound = child_entry
-                .required_attr(gimli::constants::DW_AT_upper_bound)?
-                .required_sdata_value();
 
-            let count = match count {
-                Some(count) => count,
-                None => (upper_bound? - lower_bound).try_into().unwrap(),
-            };
+            // There's either a count or an upper bound
+            let count = match (
+                child_entry
+                    .required_attr(unit, gimli::constants::DW_AT_count)
+                    .and_then(|c| c.required_udata_value()),
+                child_entry
+                    .required_attr(unit, gimli::constants::DW_AT_upper_bound)
+                    .and_then(|c| c.required_sdata_value()),
+            ) {
+                // We've got a count, so let's use that
+                (Ok(count), _) => Ok(count),
+                // We've got an upper bound, so let's calculate the count from that
+                (_, Ok(upper_bound)) => Ok((upper_bound - lower_bound).try_into().unwrap()),
+                // Both are not readable
+                (Err(e), Err(_)) => Err(e),
+            }?;
 
             Ok(VariableType::ArrayType {
                 array_type: Box::new(array_type),
@@ -244,7 +249,7 @@ fn find_type(
 
                 let enumerator_name = get_entry_name(context, unit, enumerator_entry)?;
                 let const_value = enumerator_entry
-                    .required_attr(gimli::constants::DW_AT_const_value)?
+                    .required_attr(unit, gimli::constants::DW_AT_const_value)?
                     .required_sdata_value()?;
 
                 enumerators.push(Enumerator {
@@ -592,23 +597,78 @@ fn read_variable(
         | VariableType::Union {
             type_name, members, ..
         } => {
-            let members_string = members
-                .iter()
-                .map(|member| {
-                    let member_size = member.member_type.get_variable_size() as usize;
-                    let member_data = &data[member.member_location as usize..][..member_size];
-                    let member_value =
-                        read_variable(&member.member_type, member_data, device_memory);
-                    format!(
-                        "{}: {}",
-                        member.name,
-                        member_value.unwrap_or_else(|e| format!("Error({})", e))
+            let string_render = if type_name == "&str" {
+                // Let's render the string nicely
+                let pointer = members
+                    .iter()
+                    .find(|m| matches!(m.member_type, VariableType::PointerType { .. }));
+                let length = members.iter().find(|m| {
+                    matches!(
+                        m.member_type,
+                        VariableType::BaseType {
+                            encoding: gimli::constants::DW_ATE_unsigned,
+                            byte_size: 4, // The length is a usize, so 4 bytes on cortex-m
+                            ..
+                        }
                     )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+                });
 
-            Ok(format!("{} {{ {} }}", type_name, members_string))
+                match (pointer, length) {
+                    (Some(pointer), Some(length)) => {
+                        let pointer_address = data[pointer.member_location as usize * 8..][..32]
+                            .load_le::<u32>()
+                            as usize;
+                        let length_value = data[length.member_location as usize * 8..][..32]
+                            .load_le::<u32>() as usize;
+                        let string_contents = device_memory
+                            .read_slice(pointer_address..(pointer_address + length_value));
+
+                        Some(match string_contents {
+                            Some(string_contents) => match std::str::from_utf8(string_contents) {
+                                Ok(string) => Ok(format!(
+                                    "*{:#010X}:{} (= \"{}\")",
+                                    pointer_address, length_value, string
+                                )),
+                                Err(e) => Err(format!(
+                                    "Error(string @ *{:#X}:{} contains invalid characters: {})",
+                                    pointer_address, length_value, e
+                                )),
+                            },
+                            None => Err(format!(
+                                "Error(string @ *{:#X}:{} is not within available memory)",
+                                pointer_address, length_value
+                            )),
+                        })
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            match string_render {
+                Some(string_render) => string_render,
+                None => {
+                    let members_string = members
+                        .iter()
+                        .map(|member| {
+                            let member_size = member.member_type.get_variable_size() as usize;
+                            let member_data =
+                                &data[member.member_location as usize * 8..][..member_size * 8];
+                            let member_value =
+                                read_variable(&member.member_type, member_data, device_memory);
+                            format!(
+                                "{}: {}",
+                                member.name,
+                                member_value.unwrap_or_else(|e| format!("Error({})", e))
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    Ok(format!("{} {{ {} }}", type_name, members_string))
+                }
+            }
         }
         VariableType::Subroutine => Ok(format!("_")),
     }
@@ -625,6 +685,11 @@ pub fn find_variables(
     mut frame_base: Option<u32>,
 ) -> Result<(), TraceError> {
     let entry = node.entry();
+
+    log::trace!(
+        "Checking out the entry @ .debug_info: {:X}",
+        unit.header.offset().as_debug_info_offset().unwrap().0 + entry.offset().0
+    );
 
     let frame_base_location = evaluate_location(
         context,
@@ -655,6 +720,7 @@ pub fn find_variables(
         let mut variable_name = get_entry_name(context, unit, entry);
 
         if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
+            log::trace!("Formal parameter does not have a name, renaming it to 'param'");
             variable_name = Ok("param".into());
         }
 
@@ -699,13 +765,16 @@ pub fn find_variables(
                 })
             }
             (Ok(variable_name), Err(type_error)) => {
-                println!(
-                    "Could not read the type of variable `{}`: {:?}",
-                    variable_name, type_error
+                log::debug!(
+                    "Could not read the type of variable `{}`: {}",
+                    variable_name,
+                    type_error
                 );
+                return Ok(());
             }
             (Err(name_error), _) => {
-                println!("Could not get the name of a variable: {:?}", name_error);
+                log::debug!("Could not get the name of a variable: {}", name_error);
+                return Ok(());
             }
         }
     }

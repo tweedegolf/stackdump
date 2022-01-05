@@ -1,30 +1,57 @@
 use gimli::{
     Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAt, Expression, Reader,
+    ReaderOffset, Unit,
 };
 
 use crate::cortex_m::TraceError;
 
 pub trait DebuggingInformationEntryExt<R: Reader> {
-    fn required_attr(&self, name: DwAt) -> Result<Attribute<R>, TraceError>;
+    fn required_attr(
+        &self,
+        unit: &Unit<R, R::Offset>,
+        name: DwAt,
+    ) -> Result<Attribute<R>, TraceError>;
 }
 
-impl<R: Reader> DebuggingInformationEntryExt<R> for DebuggingInformationEntry<'_, '_, R> {
-    fn required_attr(&self, name: DwAt) -> Result<Attribute<R>, TraceError> {
-        self.attr(name)?
-            .ok_or_else(|| TraceError::MissingAttribute {
+impl<R, O> DebuggingInformationEntryExt<R> for DebuggingInformationEntry<'_, '_, R>
+where
+    O: ReaderOffset + TryInto<u64>,
+    R: Reader<Offset = O>,
+{
+    fn required_attr(&self, unit: &Unit<R, O>, name: DwAt) -> Result<Attribute<R>, TraceError> {
+        if let Some(attr) = self.attr(name)? {
+            Ok(attr)
+        } else {
+            let unit_section_offset = match unit.header.offset() {
+                gimli::UnitSectionOffset::DebugInfoOffset(o) => Some(
+                    o.0.try_into()
+                        .map_err(|_| TraceError::NumberConversionError)?,
+                ),
+                gimli::UnitSectionOffset::DebugTypesOffset(_) => None,
+            };
+
+            let unit_offset: u64 = self
+                .offset()
+                .0
+                .try_into()
+                .map_err(|_| TraceError::NumberConversionError)?;
+
+            Err(TraceError::MissingAttribute {
+                entry_debug_info_offset: unit_section_offset.map(|uo| uo + unit_offset),
                 entry_tag: self.tag().to_string(),
                 attribute_name: name.to_string(),
             })
+        }
     }
 }
 
-impl<R: Reader> DebuggingInformationEntryExt<R> for &DebuggingInformationEntry<'_, '_, R> {
-    fn required_attr(&self, name: DwAt) -> Result<Attribute<R>, TraceError> {
-        self.attr(name)?
-            .ok_or_else(|| TraceError::MissingAttribute {
-                entry_tag: self.tag().to_string(),
-                attribute_name: name.to_string(),
-            })
+impl<R, E> DebuggingInformationEntryExt<R> for &E
+where
+    R: Reader,
+    E: DebuggingInformationEntryExt<R>
+{
+    fn required_attr(&self, unit: &Unit<R, R::Offset>, name: DwAt) -> Result<Attribute<R>, TraceError> {
+        (*self).required_attr(unit, name)
     }
 }
 
