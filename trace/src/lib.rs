@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-pub use stackdump_capture;
 pub use stackdump_core;
 
 pub mod cortex_m;
@@ -190,9 +189,4 @@ pub struct TemplateTypeParam {
 pub struct Enumerator {
     pub name: String,
     pub const_value: i64,
-}
-
-pub trait Trace {
-    type Error;
-    fn trace(&self, elf_data: &[u8]) -> Result<Vec<Frame>, Self::Error>;
 }

@@ -6,11 +6,10 @@ use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
-use stackdump_capture::cortex_m::CortexMTarget;
-use stackdump_capture::stackdump_core::Stackdump;
+use stackdump_capture::stackdump_core::memory_region::ArrayVecMemoryRegion;
 
 #[link_section = ".uninit"]
-static mut STACKDUMP: MaybeUninit<Stackdump<CortexMTarget, 2048>> = MaybeUninit::uninit();
+static mut STACKDUMP: MaybeUninit<ArrayVecMemoryRegion<4096>> = MaybeUninit::uninit();
 
 const MESSAGES: [&'static str; 4] = [
     "I love you",
@@ -103,23 +102,23 @@ fn TIMER0() {
     timer.events_compare[0].write(|w| w);
 
     unsafe {
-        let dump = STACKDUMP.assume_init_mut();
-        dump.capture();
+        cortex_m::interrupt::free(|cs| {
+            let stack = STACKDUMP.write(ArrayVecMemoryRegion::default());
+            let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture_with_fpu(stack, cs);
+            rprintln!("{:2X?}", core_registers);
+            rprintln!("{:2X?}", fpu_registers);
+            rprintln!("Start of stack: {:#010X}", stack.start_address);
 
-        #[inline(never)]
-        fn write_dump<const STACK_SIZE: usize>(dump: &mut Stackdump<CortexMTarget, STACK_SIZE>) {
-            rprintln!("{:2X?}", dump.registers);
-
-            let mut buffer = [0; 1024];
-            let mut dump_reader = dump.get_reader();
-            while let Ok(bytes @ 1..) = dump_reader.read(&mut buffer) {
-                unsafe {
-                    DUMP_RTT_CHANNEL.as_mut().unwrap().write(&buffer[..bytes]);
-                }
+            for byte in core_registers.iter() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
-        }
-
-        write_dump(dump);
+            for byte in fpu_registers.iter() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
+            }
+            for byte in stack.iter() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
+            }
+        });
     }
 
     panic!();

@@ -8,7 +8,6 @@ use gimli::{
     Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, EndianReader, EntriesTree,
     EvaluationResult, Piece, Reader, RunTimeEndian, Unit,
 };
-use stackdump_capture::cortex_m::CortexMRegisters;
 use stackdump_core::device_memory::DeviceMemory;
 use std::{ops::Deref, rc::Rc};
 
@@ -274,7 +273,7 @@ fn find_type(
 fn evaluate_location(
     context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-    registers: &CortexMRegisters,
+    device_memory: &DeviceMemory<u32>,
     location: Option<Attribute<EndianReader<RunTimeEndian, Rc<[u8]>>>>,
     frame_base: Option<u32>,
 ) -> Result<VariableLocationResult, TraceError> {
@@ -292,7 +291,8 @@ fn evaluate_location(
 
             while let Ok(Some(maybe_location)) = locations.next() {
                 // The .debug_loc does not seem to count the thumb bit, so remove it
-                let check_pc = u64::from(*registers.base.pc() & !super::THUMB_BIT);
+                let check_pc =
+                    u64::from(device_memory.register(gimli::Arm::PC)? & !super::THUMB_BIT);
 
                 if check_pc >= maybe_location.range.begin && check_pc < maybe_location.range.end {
                     location = Some(maybe_location);
@@ -318,8 +318,8 @@ fn evaluate_location(
                 register,
                 base_type: _,
             } => {
-                let value = registers.base.register(register.0 as usize);
-                result = location_evaluation.resume_with_register(gimli::Value::U32(*value))?;
+                let value = device_memory.register(register)?;
+                result = location_evaluation.resume_with_register(gimli::Value::U32(value))?;
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
                 result = location_evaluation.resume_with_frame_base(
@@ -339,42 +339,18 @@ fn evaluate_location(
 }
 
 fn get_piece_data(
-    device_memory: &DeviceMemory,
-    registers: &CortexMRegisters,
+    device_memory: &DeviceMemory<u32>,
     piece: Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     variable_size: u64,
-) -> Result<Option<bitvec::vec::BitVec<Lsb0, u8>>, String> {
+) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, String> {
     let mut data = match piece.location.clone() {
         gimli::Location::Empty => return Err("Optimized away (Empty location)".into()),
-        gimli::Location::Register { register } => match register.0 {
-            // Check R0..=R15
-            r @ 0..=15 => {
-                let mut data = BitVec::new();
-                data.extend(registers.base.register(r.into()).view_bits::<Lsb0>());
-                Some(data)
-            }
-            // Check S0..=S31
-            r @ 256..=271 => {
-                let mut data = BitVec::new();
-                data.extend(
-                    registers
-                        .fpu
-                        .fpu_register(r as usize - 256)
-                        .view_bits::<Lsb0>(),
-                );
-                data.extend(
-                    registers
-                        .fpu
-                        .fpu_register(r as usize - 256 + 1)
-                        .view_bits::<Lsb0>(),
-                );
-                Some(data)
-            }
-            _ => unreachable!(
-                "Register {} is not available",
-                gimli::Arm::register_name(register).unwrap_or("UNKNOWN")
-            ),
-        },
+        gimli::Location::Register { register } => Some(
+            device_memory
+                .register(register)
+                .map(|r| r.to_ne_bytes().view_bits().to_bitvec())
+                .map_err(|e| e.to_string())?,
+        ),
         gimli::Location::Address { address } => device_memory
             .read_slice(address as usize..(address + variable_size) as usize)
             .map(|b| b.view_bits().to_bitvec()),
@@ -419,11 +395,10 @@ fn get_piece_data(
 }
 
 fn get_variable_data(
-    device_memory: &DeviceMemory,
-    registers: &CortexMRegisters,
+    device_memory: &DeviceMemory<u32>,
     variable_type: &VariableType,
     variable_location: VariableLocationResult,
-) -> Result<BitVec<Lsb0, u8>, String> {
+) -> Result<BitVec<u8, Lsb0>, String> {
     let variable_size = variable_type.get_variable_size();
 
     match variable_location {
@@ -440,7 +415,7 @@ fn get_variable_data(
             let mut data = BitVec::new();
 
             for piece in pieces {
-                let piece_data = get_piece_data(device_memory, registers, piece, variable_size)?;
+                let piece_data = get_piece_data(device_memory, piece, variable_size)?;
 
                 if let Some(mut piece_data) = piece_data {
                     data.append(&mut piece_data);
@@ -464,14 +439,20 @@ fn get_variable_data(
 /// If it can not be read, an Err is returned with a user displayable error.
 fn read_variable(
     variable_type: &VariableType,
-    data: &BitSlice<Lsb0, u8>,
-    device_memory: &DeviceMemory,
+    data: &BitSlice<u8, Lsb0>,
+    device_memory: &DeviceMemory<u32>,
 ) -> Result<String, String> {
     fn read_base_type(
         encoding: &gimli::DwAte,
         byte_size: &u64,
-        data: &BitSlice<Lsb0, u8>,
+        type_name: &str,
+        data: &BitSlice<u8, Lsb0>,
     ) -> Result<String, String> {
+        // It's possible to read unit types here
+        if *byte_size == 0 && type_name == "()" {
+            return Ok("()".into());
+        }
+
         match *encoding {
             gimli::constants::DW_ATE_unsigned => match byte_size {
                 1 => Ok(format!("{}", data.load_le::<u8>())),
@@ -479,7 +460,7 @@ fn read_variable(
                 4 => Ok(format!("{}", data.load_le::<u32>())),
                 8 => Ok(format!("{}", data.load_le::<u64>())),
                 16 => Ok(format!("{}", data.load_le::<u128>())),
-                _ => unreachable!(),
+                _ => unreachable!("A byte_size of {} is not possible", byte_size),
             },
             gimli::constants::DW_ATE_signed => match byte_size {
                 1 => Ok(format!("{}", data.load_le::<u8>() as i8)),
@@ -487,7 +468,7 @@ fn read_variable(
                 4 => Ok(format!("{}", data.load_le::<u32>() as i32)),
                 8 => Ok(format!("{}", data.load_le::<u64>() as i64)),
                 16 => Ok(format!("{}", data.load_le::<u128>() as i128)),
-                _ => unreachable!(),
+                _ => unreachable!("A byte_size of {} is not possible", byte_size),
             },
             gimli::constants::DW_ATE_float => match byte_size {
                 4 => {
@@ -506,7 +487,7 @@ fn read_variable(
                         Ok(format!("{}", f))
                     }
                 }
-                _ => unreachable!(),
+                _ => unreachable!("A byte_size of {} is not possible", byte_size),
             },
             gimli::constants::DW_ATE_boolean => Ok(format!("{}", data.iter().any(|v| *v))),
             t => Err(format!(
@@ -521,8 +502,8 @@ fn read_variable(
         VariableType::BaseType {
             encoding,
             byte_size,
-            ..
-        } => read_base_type(encoding, byte_size, data),
+            name,
+        } => read_base_type(encoding, byte_size, name, data),
         VariableType::ArrayType {
             array_type, count, ..
         } => {
@@ -564,8 +545,8 @@ fn read_variable(
                 VariableType::BaseType {
                     encoding,
                     byte_size,
-                    ..
-                } => read_base_type(encoding, byte_size, data),
+                    name,
+                } => read_base_type(encoding, byte_size, name, data),
                 t => Err(format!(
                     "Enumeration underlying type is not a BaseType: {}",
                     t.get_first_level_name()
@@ -678,8 +659,7 @@ pub fn find_variables(
     context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
     abbreviations: &Abbreviations,
-    registers: &CortexMRegisters,
-    device_memory: &DeviceMemory,
+    device_memory: &DeviceMemory<u32>,
     node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
     variables: &mut Vec<Variable>,
     mut frame_base: Option<u32>,
@@ -694,13 +674,12 @@ pub fn find_variables(
     let frame_base_location = evaluate_location(
         context,
         unit,
-        registers,
+        device_memory,
         entry.attr(gimli::constants::DW_AT_frame_base)?,
         frame_base,
     )?;
     let frame_base_data = get_variable_data(
         device_memory,
-        registers,
         &VariableType::BaseType {
             name: String::from("frame_base"),
             encoding: gimli::constants::DW_ATE_unsigned,
@@ -744,13 +723,13 @@ pub fn find_variables(
                 let variable_location = evaluate_location(
                     context,
                     unit,
-                    registers,
+                    device_memory,
                     entry.attr(gimli::constants::DW_AT_location)?,
                     frame_base,
                 )?;
 
                 let variable_data =
-                    get_variable_data(device_memory, registers, &variable_type, variable_location);
+                    get_variable_data(device_memory, &variable_type, variable_location);
                 let variable_value = match variable_data {
                     Ok(variable_data) => {
                         read_variable(&variable_type, &variable_data, device_memory)
@@ -785,7 +764,6 @@ pub fn find_variables(
             context,
             unit,
             abbreviations,
-            registers,
             device_memory,
             child,
             variables,

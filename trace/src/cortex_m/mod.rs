@@ -1,4 +1,4 @@
-use crate::{Frame, FrameType, Trace};
+use crate::{Frame, FrameType};
 use addr2line::{
     object::{self, File, Object, ObjectSection, ObjectSymbol, SectionKind},
     Context,
@@ -7,11 +7,9 @@ use gimli::{
     BaseAddresses, CfaRule, DebugFrame, EndianRcSlice, EndianSlice, LittleEndian, RegisterRule,
     RunTimeEndian, UnwindContext, UnwindSection, UnwindTableRow,
 };
-use stackdump_capture::cortex_m::{CortexMRegisters, CortexMTarget};
 use stackdump_core::{
-    device_memory::DeviceMemory,
-    memory_region::{MemoryRegion, VecMemoryRegion},
-    Stackdump,
+    device_memory::{DeviceMemory, MissingRegisterError},
+    memory_region::VecMemoryRegion,
 };
 use std::{error::Error, ops::Range};
 use thiserror::Error;
@@ -49,6 +47,10 @@ pub enum TraceError {
     DwarfUnitNotFound { pc: u64 },
     #[error("A number could not be converted to another type")]
     NumberConversionError,
+    #[error("Register {0:?} is required, but is not available in the device memory")]
+    MissingRegister(#[from] MissingRegisterError),
+    #[error("Memory was expected to be available at address {0:#X}, but wasn't")]
+    MissingMemory(u64),
 }
 
 pub(self) const THUMB_BIT: u32 = 1;
@@ -58,8 +60,7 @@ struct UnwindingContext<'data> {
     reset_vector_address_range: Range<u32>,
     text_address_range: Range<u32>,
     addr2line_context: Context<EndianRcSlice<RunTimeEndian>>,
-    registers: CortexMRegisters,
-    device_memory: DeviceMemory,
+    device_memory: DeviceMemory<u32>,
     bases: BaseAddresses,
     unwind_context: UnwindContext<EndianSlice<'data, LittleEndian>>,
 }
@@ -67,8 +68,7 @@ struct UnwindingContext<'data> {
 impl<'data> UnwindingContext<'data> {
     pub fn create(
         elf: File<'data>,
-        registers: CortexMRegisters,
-        stack: Box<dyn MemoryRegion>,
+        mut device_memory: DeviceMemory<u32>,
     ) -> Result<Self, TraceError> {
         let addr2line_context = addr2line::Context::new(&elf)?;
 
@@ -106,9 +106,6 @@ impl<'data> UnwindingContext<'data> {
         let bases = BaseAddresses::default();
         let unwind_context = UnwindContext::new();
 
-        let mut device_memory = DeviceMemory::new();
-        device_memory.add_memory_region_boxed(stack);
-
         for section in elf.sections().filter(|section| match section.kind() {
             SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => true,
             _ => false,
@@ -124,7 +121,6 @@ impl<'data> UnwindingContext<'data> {
             reset_vector_address_range,
             text_address_range,
             addr2line_context,
-            registers,
             device_memory,
             bases,
             unwind_context,
@@ -135,14 +131,14 @@ impl<'data> UnwindingContext<'data> {
         // Find the frames of the current register context
         let mut context_frames = self
             .addr2line_context
-            .find_frames(*self.registers.base.pc() as u64)?;
+            .find_frames(self.device_memory.register(gimli::Arm::PC)? as u64)?;
 
         // Get the debug compilation unit of the current register context
         let unit = self
             .addr2line_context
-            .find_dwarf_unit(*self.registers.base.pc() as u64)
-            .ok_or_else(|| TraceError::DwarfUnitNotFound {
-                pc: *self.registers.base.pc() as u64,
+            .find_dwarf_unit(self.device_memory.register(gimli::Arm::PC)? as u64)
+            .ok_or(TraceError::DwarfUnitNotFound {
+                pc: self.device_memory.register(gimli::Arm::PC)? as u64,
             })?;
 
         // Get the abbreviations of the unit
@@ -171,7 +167,6 @@ impl<'data> UnwindingContext<'data> {
                         &self.addr2line_context,
                         unit,
                         &abbreviations,
-                        &self.registers,
                         &self.device_memory,
                         entry_root,
                         &mut variables,
@@ -206,22 +201,25 @@ impl<'data> UnwindingContext<'data> {
     /// Tries to unwind the stack.
     ///
     /// Returns the next frame and true if there are more frames or false if there are no more frames left
-    pub fn try_unwind(&mut self, last_frame: Option<&mut Frame>) -> (Option<Frame>, bool) {
+    pub fn try_unwind(
+        &mut self,
+        last_frame: Option<&mut Frame>,
+    ) -> Result<(Option<Frame>, bool), TraceError> {
         let unwind_info = self.debug_frame.unwind_info_for_address(
             &self.bases,
             &mut self.unwind_context,
-            *self.registers.base.pc() as u64,
+            self.device_memory.register(gimli::Arm::PC)? as u64,
             DebugFrame::cie_from_offset,
         );
 
         let unwind_info = match unwind_info {
             Ok(unwind_info) => unwind_info.clone(),
             Err(_e) => {
-                return (Some(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
+                return Ok((Some(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
                 1. compile the Rust code with `debug = 1` or higher. This is configured in the `profile.{{release,bench}}` sections of Cargo.toml (`profile.{{dev,test}}` default to `debug = 2`)
                 2. use a recent version of the `cortex-m` crates (e.g. cortex-m 0.6.3 or newer). Check versions in Cargo.lock
-                3. if linking to C code, compile the C code with the `-g` flag", self.registers.base.pc())),
-                    variables: Vec::new(), }), false);
+                3. if linking to C code, compile the C code with the `-g` flag", self.device_memory.register(gimli::Arm::PC)?)),
+                    variables: Vec::new(), }), false));
             }
         };
 
@@ -229,7 +227,7 @@ impl<'data> UnwindingContext<'data> {
         let stack_pointer_changed = match self.apply_unwind_info(unwind_info) {
             Ok(stack_pointer_changed) => stack_pointer_changed,
             Err(e) => {
-                return (
+                return Ok((
                     Some(Frame {
                         function: Some("Unknown".into()),
                         file: None,
@@ -239,7 +237,7 @@ impl<'data> UnwindingContext<'data> {
                         variables: Vec::new(),
                     }),
                     false,
-                );
+                ));
             }
         };
 
@@ -247,12 +245,13 @@ impl<'data> UnwindingContext<'data> {
 
         // Do we have a corrupted stack?
         if !stack_pointer_changed
-            && *self.registers.base.lr() & !THUMB_BIT == *self.registers.base.pc() & !THUMB_BIT
+            && self.device_memory.register(gimli::Arm::LR)? & !THUMB_BIT
+                == self.device_memory.register(gimli::Arm::PC)? & !THUMB_BIT
         {
             // The stack pointer didn't change and our LR points to our current PC
             // If we unwound further we'd get the same frame again so we better stop
 
-            return (
+            return Ok((
                 Some(Frame {
                     function: Some("Unknown".into()),
                     file: None,
@@ -264,20 +263,20 @@ impl<'data> UnwindingContext<'data> {
                     variables: Vec::new(),
                 }),
                 false,
-            );
+            ));
         }
 
         // Stack is not corrupted, but unwinding is not done
         // Are we returning from an exception? (EXC_RETURN)
-        if *self.registers.base.lr() > 0xffff_ffe0 {
+        if self.device_memory.register(gimli::Arm::LR)? > 0xffff_ffe0 {
             // Yes, so the registers were pushed to the stack and we need to get them back
 
             // Check the value to know if there are fpu registers to read
-            let fpu = match *self.registers.base.lr() {
+            let fpu = match self.device_memory.register(gimli::Arm::LR)? {
                 0xFFFFFFF1 | 0xFFFFFFF9 | 0xFFFFFFFD => false,
                 0xFFFFFFE1 | 0xFFFFFFE9 | 0xFFFFFFED => true,
                 _ => {
-                    return (
+                    return Ok((
                         Some(Frame {
                             function: Some("Unknown".into()),
                             file: None,
@@ -285,12 +284,12 @@ impl<'data> UnwindingContext<'data> {
                             column: None,
                             frame_type: FrameType::Corrupted(format!(
                                 "LR contains invalid EXC_RETURN value {:#10X}",
-                                *self.registers.base.lr()
+                                self.device_memory.register(gimli::Arm::LR)?
                             )),
                             variables: Vec::new(),
                         }),
                         false,
-                    );
+                    ));
                 }
             };
 
@@ -300,8 +299,8 @@ impl<'data> UnwindingContext<'data> {
 
             match self.update_registers_with_exception_stack(fpu) {
                 Ok(()) => {}
-                Err(address) => {
-                    return (
+                Err(TraceError::MissingMemory(address)) => {
+                    return Ok((
                         Some(Frame {
                             function: Some("Unknown".into()),
                             file: None,
@@ -314,22 +313,24 @@ impl<'data> UnwindingContext<'data> {
                             variables: Vec::new(),
                         }),
                         false,
-                    );
+                    ));
                 }
+                Err(e) => return Err(e),
             }
         } else {
             // No exception, so follow the LR back
-            *self.registers.base.pc_mut() = *self.registers.base.lr();
+            *self.device_memory.register_mut(gimli::Arm::PC)? =
+                self.device_memory.register(gimli::Arm::LR)?
         }
 
         // Have we reached the reset vector?
         if self
             .reset_vector_address_range
-            .contains(self.registers.base.pc())
+            .contains(self.device_memory.register_ref(gimli::Arm::PC)?)
         {
             // Yes, let's make that a frame as well
             // We'll also make an assumption that there's no frames before reset
-            return (
+            return Ok((
                 Some(Frame {
                     function: Some("RESET".into()),
                     file: None,
@@ -339,30 +340,34 @@ impl<'data> UnwindingContext<'data> {
                     variables: Vec::new(),
                 }),
                 false,
-            );
+            ));
         }
 
-        if self.is_last_frame() {
-            (None, false)
+        if self.is_last_frame()? {
+            Ok((None, false))
         } else {
             // Is our stack pointer in a weird place?
             if self
                 .device_memory
-                .read_u32(*self.registers.base.sp() as usize, RunTimeEndian::Little)
+                .read_u32(
+                    self.device_memory.register(gimli::Arm::SP)? as usize,
+                    RunTimeEndian::Little,
+                )
                 .is_none()
             {
-                (Some(Frame {
+                Ok((Some(Frame {
                     function: Some("Unknown".into()),
                     file: None,
                     line: None,
                     column: None,
                     frame_type: FrameType::Corrupted(
-                        format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", *self.registers.base.sp()),
+                        format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", self.device_memory
+                        .register(gimli::Arm::SP)?),
                     ),
                     variables: Vec::new(),
-                }), false)
+                }), false))
             } else {
-                (None, true)
+                Ok((None, true))
             }
         }
     }
@@ -373,11 +378,10 @@ impl<'data> UnwindingContext<'data> {
     ) -> Result<bool, Box<dyn Error>> {
         let updated = match unwind_info.cfa() {
             CfaRule::RegisterAndOffset { register, offset } => {
-                let new_cfa =
-                    (i64::from(*self.registers.base.register(register.0 as usize)) + offset) as u32;
-                let old_cfa = *self.registers.base.sp();
+                let new_cfa = (self.device_memory.register(*register)? as i64 + *offset) as u32;
+                let old_cfa = self.device_memory.register(gimli::Arm::SP)?;
                 let changed = new_cfa != old_cfa;
-                *self.registers.base.sp_mut() = new_cfa;
+                *self.device_memory.register_mut(gimli::Arm::SP)? = new_cfa;
                 changed
             }
             CfaRule::Expression(_) => todo!("CfaRule::Expression"),
@@ -387,13 +391,13 @@ impl<'data> UnwindingContext<'data> {
             match rule {
                 RegisterRule::Undefined => unreachable!(),
                 RegisterRule::Offset(offset) => {
-                    let cfa = *self.registers.base.sp();
+                    let cfa = self.device_memory.register(gimli::Arm::SP)?;
                     let addr = (i64::from(cfa) + offset) as u32;
                     let new_value = self
                         .device_memory
                         .read_u32(addr as usize, RunTimeEndian::Little)
                         .ok_or(format!("Address {:#010X} not within stack space", addr))?;
-                    *self.registers.base.register_mut(reg.0 as usize) = new_value;
+                    *self.device_memory.register_mut(*reg)? = new_value;
                 }
                 _ => unimplemented!(),
             }
@@ -402,95 +406,133 @@ impl<'data> UnwindingContext<'data> {
         Ok(updated)
     }
 
-    fn is_last_frame(&self) -> bool {
-        *self.registers.base.lr() == 0
-            || (!self.text_address_range.contains(self.registers.base.pc())
-                && *self.registers.base.lr() <= 0xFFFF_FFE0)
+    fn is_last_frame(&self) -> Result<bool, TraceError> {
+        Ok(self.device_memory.register(gimli::Arm::LR)? == 0
+            || (!self
+                .text_address_range
+                .contains(self.device_memory.register_ref(gimli::Arm::PC)?)
+                && self.device_memory.register(gimli::Arm::LR)? <= 0xFFFF_FFE0))
     }
 
     /// Assumes we are at an exception point in the stack unwinding.
     /// Reads the registers that were stored on the stack and updates our current register representation with it.
     ///
     /// Returns Ok if everything went fine or an error with an address if the stack could not be read
-    fn update_registers_with_exception_stack(&mut self, fpu: bool) -> Result<(), usize> {
-        let current_sp = *self.registers.base.sp();
+    fn update_registers_with_exception_stack(&mut self, fpu: bool) -> Result<(), TraceError> {
+        let current_sp = self.device_memory.register(gimli::Arm::SP)?;
 
-        let read_stack_var = |index: usize| {
-            self.device_memory
-                .read_u32(current_sp as usize + index * 4, RunTimeEndian::Little)
-                .ok_or(current_sp as usize + index * 4)
-        };
-        *self.registers.base.register_mut(0) = read_stack_var(0)?;
-        *self.registers.base.register_mut(1) = read_stack_var(1)?;
-        *self.registers.base.register_mut(2) = read_stack_var(2)?;
-        *self.registers.base.register_mut(3) = read_stack_var(3)?;
-        *self.registers.base.register_mut(12) = read_stack_var(4)?;
-        *self.registers.base.lr_mut() = read_stack_var(5)?;
-        *self.registers.base.pc_mut() = read_stack_var(6)?;
+        fn read_stack_var(
+            device_memory: &DeviceMemory<u32>,
+            starting_sp: u32,
+            index: usize,
+        ) -> Result<u32, TraceError> {
+            device_memory
+                .read_u32(starting_sp as usize + index * 4, RunTimeEndian::Little)
+                .ok_or(TraceError::MissingMemory(
+                    starting_sp as u64 + index as u64 * 4,
+                ))
+        }
+
+        *self.device_memory.register_mut(gimli::Arm::R0)? =
+            read_stack_var(&self.device_memory, current_sp, 0)?;
+        *self.device_memory.register_mut(gimli::Arm::R1)? =
+            read_stack_var(&self.device_memory, current_sp, 1)?;
+        *self.device_memory.register_mut(gimli::Arm::R2)? =
+            read_stack_var(&self.device_memory, current_sp, 2)?;
+        *self.device_memory.register_mut(gimli::Arm::R3)? =
+            read_stack_var(&self.device_memory, current_sp, 3)?;
+        *self.device_memory.register_mut(gimli::Arm::R12)? =
+            read_stack_var(&self.device_memory, current_sp, 4)?;
+        *self.device_memory.register_mut(gimli::Arm::LR)? =
+            read_stack_var(&self.device_memory, current_sp, 5)?;
+        *self.device_memory.register_mut(gimli::Arm::PC)? =
+            read_stack_var(&self.device_memory, current_sp, 6)?;
+        // At stack place 7 is the PSR register, but we don't need that, so we skip it
+
         // Adjust the sp with the size of what we've read
-        *self.registers.base.sp_mut() =
-            *self.registers.base.sp() + 8 * std::mem::size_of::<u32>() as u32;
+        *self.device_memory.register_mut(gimli::Arm::SP)? =
+            self.device_memory.register(gimli::Arm::SP)? + 8 * std::mem::size_of::<u32>() as u32;
 
         if fpu {
-            *self.registers.fpu.fpu_register_mut(0) = read_stack_var(8)?;
-            *self.registers.fpu.fpu_register_mut(1) = read_stack_var(9)?;
-            *self.registers.fpu.fpu_register_mut(2) = read_stack_var(10)?;
-            *self.registers.fpu.fpu_register_mut(3) = read_stack_var(11)?;
-            *self.registers.fpu.fpu_register_mut(4) = read_stack_var(12)?;
-            *self.registers.fpu.fpu_register_mut(5) = read_stack_var(13)?;
-            *self.registers.fpu.fpu_register_mut(6) = read_stack_var(14)?;
-            *self.registers.fpu.fpu_register_mut(7) = read_stack_var(15)?;
-            *self.registers.fpu.fpu_register_mut(8) = read_stack_var(16)?;
-            *self.registers.fpu.fpu_register_mut(9) = read_stack_var(17)?;
-            *self.registers.fpu.fpu_register_mut(10) = read_stack_var(18)?;
-            *self.registers.fpu.fpu_register_mut(11) = read_stack_var(19)?;
-            *self.registers.fpu.fpu_register_mut(12) = read_stack_var(20)?;
-            *self.registers.fpu.fpu_register_mut(13) = read_stack_var(21)?;
-            *self.registers.fpu.fpu_register_mut(14) = read_stack_var(22)?;
-            *self.registers.fpu.fpu_register_mut(15) = read_stack_var(23)?;
+            *self.device_memory.register_mut(gimli::Arm::D0)? =
+                read_stack_var(&self.device_memory, current_sp, 8)?;
+            *self.device_memory.register_mut(gimli::Arm::D1)? =
+                read_stack_var(&self.device_memory, current_sp, 9)?;
+            *self.device_memory.register_mut(gimli::Arm::D2)? =
+                read_stack_var(&self.device_memory, current_sp, 10)?;
+            *self.device_memory.register_mut(gimli::Arm::D3)? =
+                read_stack_var(&self.device_memory, current_sp, 11)?;
+            *self.device_memory.register_mut(gimli::Arm::D4)? =
+                read_stack_var(&self.device_memory, current_sp, 12)?;
+            *self.device_memory.register_mut(gimli::Arm::D5)? =
+                read_stack_var(&self.device_memory, current_sp, 13)?;
+            *self.device_memory.register_mut(gimli::Arm::D6)? =
+                read_stack_var(&self.device_memory, current_sp, 14)?;
+            *self.device_memory.register_mut(gimli::Arm::D7)? =
+                read_stack_var(&self.device_memory, current_sp, 15)?;
+            *self.device_memory.register_mut(gimli::Arm::D8)? =
+                read_stack_var(&self.device_memory, current_sp, 16)?;
+            *self.device_memory.register_mut(gimli::Arm::D9)? =
+                read_stack_var(&self.device_memory, current_sp, 17)?;
+            *self.device_memory.register_mut(gimli::Arm::D10)? =
+                read_stack_var(&self.device_memory, current_sp, 18)?;
+            *self.device_memory.register_mut(gimli::Arm::D11)? =
+                read_stack_var(&self.device_memory, current_sp, 19)?;
+            *self.device_memory.register_mut(gimli::Arm::D12)? =
+                read_stack_var(&self.device_memory, current_sp, 20)?;
+            *self.device_memory.register_mut(gimli::Arm::D13)? =
+                read_stack_var(&self.device_memory, current_sp, 21)?;
+            *self.device_memory.register_mut(gimli::Arm::D14)? =
+                read_stack_var(&self.device_memory, current_sp, 22)?;
+            *self.device_memory.register_mut(gimli::Arm::D15)? =
+                read_stack_var(&self.device_memory, current_sp, 23)?;
+            // At stack place 24 is the fpscr register, but we don't need that, so we skip it
+
             // Adjust the sp with the size of what we've read
-            *self.registers.base.sp_mut() = *self.registers.base.sp() + 17;
+            *self.device_memory.register_mut(gimli::Arm::SP)? =
+                self.device_memory.register(gimli::Arm::SP)?
+                    + 17 * std::mem::size_of::<u32>() as u32;
         }
 
         Ok(())
     }
 }
 
-impl<const STACK_SIZE: usize> Trace for Stackdump<CortexMTarget, STACK_SIZE> {
-    type Error = TraceError;
+pub fn trace(
+    device_memory: DeviceMemory<u32>,
+    elf_data: &[u8],
+) -> Result<Vec<crate::Frame>, TraceError> {
+    let mut frames = Vec::new();
 
-    fn trace(&self, elf_data: &[u8]) -> Result<Vec<crate::Frame>, Self::Error> {
-        let mut frames = Vec::new();
+    let elf = addr2line::object::File::parse(elf_data)?;
+    // Get the elf file context
+    let mut context = UnwindingContext::create(elf, device_memory)?;
 
-        let elf = addr2line::object::File::parse(elf_data)?;
-        // Get the elf file context
-        let mut context =
-            UnwindingContext::create(elf, self.registers.clone(), Box::new(self.stack.clone()))?;
+    // Keep looping until we've got the entire trace
+    loop {
+        // #[cfg(test)]
+        // println!("{:02X?}", context.registers);
 
-        // Keep looping until we've got the entire trace
-        loop {
-            // #[cfg(test)]
-            // println!("{:02X?}", context.registers);
+        context.find_current_frames(&mut frames)?;
 
-            context.find_current_frames(&mut frames)?;
+        let (unwind_frame, unwinding_left) = context.try_unwind(frames.last_mut())?;
 
-            let (unwind_frame, unwinding_left) = context.try_unwind(frames.last_mut());
-
-            if let Some(unwind_frame) = unwind_frame {
-                frames.push(unwind_frame);
-            }
-
-            if !unwinding_left {
-                break;
-            }
+        if let Some(unwind_frame) = unwind_frame {
+            frames.push(unwind_frame);
         }
 
-        Ok(frames)
+        if !unwinding_left {
+            break;
+        }
     }
+
+    Ok(frames)
 }
 
 #[cfg(test)]
 mod tests {
+    use stackdump_core::register_data::VecRegisterData;
+
     use super::*;
 
     const ELF: &[u8] = include_bytes!("../../../examples/data/nrf52840");
@@ -498,10 +540,20 @@ mod tests {
 
     #[test]
     fn example_dump() {
-        simple_logger::SimpleLogger::new().with_level(log::LevelFilter::Debug).init().unwrap();
+        simple_logger::SimpleLogger::new()
+            .with_level(log::LevelFilter::Debug)
+            .init()
+            .unwrap();
 
-        let stackdump: Stackdump<CortexMTarget, 2048> = Stackdump::try_from(DUMP).unwrap();
-        let frames = stackdump.trace(ELF).unwrap();
+        let mut dump_iter = DUMP.iter().copied();
+
+        let mut device_memory = DeviceMemory::new();
+
+        device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
+        device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
+        device_memory.add_memory_region(VecMemoryRegion::from_iter(&mut dump_iter));
+        
+        let frames = trace(device_memory, ELF).unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);
         }
