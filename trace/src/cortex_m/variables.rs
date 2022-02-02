@@ -1,6 +1,6 @@
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
-    Enumerator, StructureMember, TemplateTypeParam, Variable, VariableType,
+    Enumerator, StructureMember, TemplateTypeParam, Variable, VariableType, VariableKind,
 };
 use addr2line::Context;
 use bitvec::prelude::*;
@@ -24,6 +24,36 @@ fn get_entry_name(
     let attr_string = context.dwarf().attr_string(unit, name_attr.value())?;
     // Convert to String
     Ok(attr_string.to_string()?.into())
+}
+
+fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
+    unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    abbreviations: &'abbrev Abbreviations,
+    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+) -> Result<Option<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>>, TraceError>
+{
+    // Find the attribute
+    let abstract_origin_attr = entry.attr(gimli::constants::DW_AT_abstract_origin)?;
+
+    let abstract_origin_attr = match abstract_origin_attr {
+        Some(abstract_origin_attr) => abstract_origin_attr,
+        None => return Ok(None),
+    };
+
+    // Check its offset
+    let type_offset = if let AttributeValue::UnitRef(offset) = abstract_origin_attr.value() {
+        Ok(offset)
+    } else {
+        Err(TraceError::WrongAttributeValueType {
+            attribute_name: abstract_origin_attr.name().to_string(),
+            value_type_name: "UnitRef",
+        })
+    }?;
+
+    // Get the entries for the type
+    Ok(Some(
+        unit.header.entries_tree(abbreviations, Some(type_offset))?,
+    ))
 }
 
 fn get_entry_type_reference_tree<'abbrev, 'unit>(
@@ -695,8 +725,22 @@ pub fn find_variables(
     if entry.tag() == gimli::constants::DW_TAG_variable
         || entry.tag() == gimli::constants::DW_TAG_formal_parameter
     {
+        let mut abstract_origin_tree =
+            get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
+        let abstract_origin_node = abstract_origin_tree
+            .as_mut()
+            .map(|tree| tree.root().ok())
+            .flatten();
+        let abstract_origin_entry = abstract_origin_node.as_ref().map(|node| node.entry());
+
         // Get the name of the variable
-        let mut variable_name = get_entry_name(context, unit, entry);
+        let variable_name = get_entry_name(context, unit, entry);
+
+        // Alternatively, get the name from the abstract origin
+        let mut variable_name = match (variable_name, abstract_origin_entry) {
+            (Err(_), Some(entry)) => get_entry_name(context, unit, entry),
+            (variable_name, _) => variable_name,
+        };
 
         if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
             log::trace!("Formal parameter does not have a name, renaming it to 'param'");
@@ -710,21 +754,47 @@ pub fn find_variables(
                 find_type(context, unit, abbreviations, type_root)
             });
 
+        // Alternatively, get the type from the abstract origin
+        let variable_type = match (variable_type, abstract_origin_entry) {
+            (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
+                .and_then(|mut type_tree| {
+                    let type_root = type_tree.root()?;
+                    find_type(context, unit, abbreviations, type_root)
+                }),
+            (variable_type, _) => variable_type,
+        };
+
+        let mut variable_kind = VariableKind::Normal;
+        if entry.tag() == gimli::constants::DW_TAG_formal_parameter {
+            variable_kind = variable_kind.and(VariableKind::Parameter);
+        }
+        if abstract_origin_entry.is_some() {
+            variable_kind = variable_kind.and(VariableKind::Inlined);
+        }
+
         match (variable_name, variable_type) {
             (Ok(variable_name), Ok(variable_type)) if variable_type.get_variable_size() == 0 => {
                 variables.push(Variable {
                     name: variable_name,
+                    kind: variable_kind,
                     value: Ok("{ (ZST) }".into()),
                     variable_type,
                 })
             }
             (Ok(variable_name), Ok(variable_type)) => {
+                let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
+
+                let location_attr = match (location_attr, abstract_origin_entry) {
+                    (None, Some(entry)) => entry.attr(gimli::constants::DW_AT_location)?,
+                    (location_attr, _) => location_attr,
+                };
+
                 // Get the location of the variable
                 let variable_location = evaluate_location(
                     context,
                     unit,
                     device_memory,
-                    entry.attr(gimli::constants::DW_AT_location)?,
+                    location_attr,
                     frame_base,
                 )?;
 
@@ -739,6 +809,7 @@ pub fn find_variables(
 
                 variables.push(Variable {
                     name: variable_name,
+                    kind: variable_kind,
                     value: variable_value,
                     variable_type,
                 })

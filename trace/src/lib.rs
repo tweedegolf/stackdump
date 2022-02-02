@@ -56,21 +56,59 @@ pub enum FrameType {
 #[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
-    pub value: Result<String, String>,
-    pub variable_type: VariableType, // TODO: Make this platform independent. Right now this only works for cortex-m
+    pub kind: VariableKind,
+    pub value: Result<String, String>, // TODO: Don't turn everything into a string
+    pub variable_type: VariableType,
 }
 
 impl Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut kind_text = self.kind.to_string();
+        if kind_text.len() > 0 {
+            kind_text = format!("({}) ", kind_text);
+        }
+
         writeln!(
             f,
-            "{}: {} ({})",
+            "{}{}: {} ({})",
+            kind_text,
             self.name,
             self.value
                 .clone()
                 .unwrap_or_else(|e| format!("Error({})", &e)),
             self.variable_type.get_first_level_name(),
         )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VariableKind {
+    Normal,
+    Parameter,
+    Inlined,
+    InlinedParameter,
+}
+
+impl VariableKind {
+    #[must_use]
+    pub fn and(self, modifier: Self) -> Self {
+        match (self, modifier) {
+            (VariableKind::Normal, other) => other,
+            (VariableKind::Parameter, VariableKind::Inlined) => Self::InlinedParameter,
+            (VariableKind::Inlined, VariableKind::Parameter) => Self::InlinedParameter,
+            (s, _) => s,
+        }
+    }
+}
+
+impl Display for VariableKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VariableKind::Normal => Ok(()),
+            VariableKind::Parameter => write!(f, "parameter"),
+            VariableKind::Inlined => write!(f, "inlined"),
+            VariableKind::InlinedParameter => write!(f, "inlined parameter"),
+        }
     }
 }
 
