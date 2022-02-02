@@ -6,11 +6,32 @@ pub mod cortex_m;
 mod gimli_extensions;
 
 #[derive(Debug, Clone)]
+pub struct Location {
+    pub file: Option<String>,
+    pub line: Option<u64>,
+    pub column: Option<u64>,
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(file) = self.file.clone() {
+            write!(f, "{}", file)?;
+            if let Some(line) = self.line {
+                write!(f, ":{}", line)?;
+                if let Some(column) = self.column {
+                    write!(f, ":{}", column)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Frame {
     pub function: Option<String>,
-    pub file: Option<String>,
-    pub line: Option<u32>,
-    pub column: Option<u32>,
+    pub location: Location,
     pub frame_type: FrameType,
     pub variables: Vec<Variable>,
 }
@@ -24,15 +45,9 @@ impl Display for Frame {
             self.frame_type
         )?;
 
-        if let Some(file) = self.file.clone() {
-            write!(f, "  at {}", file)?;
-            if let Some(line) = self.line {
-                write!(f, ":{}", line)?;
-                if let Some(column) = self.column {
-                    write!(f, ":{}", column)?;
-                }
-            }
-            writeln!(f)?;
+        let location_text = self.location.to_string();
+        if location_text.len() > 0 {
+            writeln!(f, "  at {}", location_text)?;
         }
 
         if !self.variables.is_empty() {
@@ -59,6 +74,7 @@ pub struct Variable {
     pub kind: VariableKind,
     pub value: Result<String, String>, // TODO: Don't turn everything into a string
     pub variable_type: VariableType,
+    pub file_location: Location,
 }
 
 impl Display for Variable {
@@ -68,15 +84,21 @@ impl Display for Variable {
             kind_text = format!("({}) ", kind_text);
         }
 
+        let mut location_text = self.file_location.to_string();
+        if location_text.len() > 0 {
+            location_text = format!(" at {}", location_text);
+        }
+
         writeln!(
             f,
-            "{}{}: {} ({})",
+            "{}{}: {} ({}){}",
             kind_text,
             self.name,
             self.value
                 .clone()
                 .unwrap_or_else(|e| format!("Error({})", &e)),
             self.variable_type.get_first_level_name(),
+            location_text,
         )
     }
 }

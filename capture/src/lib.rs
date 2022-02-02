@@ -5,7 +5,7 @@
 //!
 //! This only helps with capturing the stack and the registers.
 //! If you want to capture the heap or any static data, then you'll have to do that yourself.
-//! 
+//!
 //! The crate is built on the `stackdump-core` crate.
 //! To get stack traces, feed the captured data into the `stackdump-trace` crate.
 //!
@@ -98,7 +98,7 @@
 //!             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(STACK_CAPTURE.assume_init_mut(), &cs);
 //!             CORE_REGISTERS_CAPTURE.write(core_registers);
 //!             CORE_REGISTERS_CAPTURE.write(fpu_registers);
-//! 
+//!
 //!             // If you want to capture the heap or the static data, then do that here too
 //!         }
 //!

@@ -107,10 +107,7 @@ impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterD
         let starting_register_number =
             u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
 
-        let register_count = u16::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
+        let register_count = u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
 
         let mut registers = ArrayVec::new();
         let register_size = core::mem::size_of::<RB>();
@@ -188,10 +185,7 @@ impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
         let starting_register_number =
             u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
 
-        let register_count = u16::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
+        let register_count = u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
 
         let mut registers = Vec::new();
         let register_size = core::mem::size_of::<RB>();
@@ -257,7 +251,10 @@ impl<'a, RB: RegisterBacking> Iterator for RegisterDataIterator<'a, RB> {
                 let le_register = self.registers.get(register_index)?.to_le();
                 // We can take a slice to it because we checked the length and we know it's in little endian
                 let register_slice = unsafe {
-                    core::slice::from_raw_parts(&le_register as *const RB as *const u8, register_size)
+                    core::slice::from_raw_parts(
+                        &le_register as *const RB as *const u8,
+                        register_size,
+                    )
                 };
                 Some(register_slice[byte_index])
             }

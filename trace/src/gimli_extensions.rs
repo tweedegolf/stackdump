@@ -48,9 +48,13 @@ where
 impl<R, E> DebuggingInformationEntryExt<R> for &E
 where
     R: Reader,
-    E: DebuggingInformationEntryExt<R>
+    E: DebuggingInformationEntryExt<R>,
 {
-    fn required_attr(&self, unit: &Unit<R, R::Offset>, name: DwAt) -> Result<Attribute<R>, TraceError> {
+    fn required_attr(
+        &self,
+        unit: &Unit<R, R::Offset>,
+        name: DwAt,
+    ) -> Result<Attribute<R>, TraceError> {
         (*self).required_attr(unit, name)
     }
 }

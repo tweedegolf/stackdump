@@ -114,7 +114,7 @@ fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
 
 /// Capture the stack from the current given stack pointer until the start of the stack into the given stack memory region.
 /// The captured stack will be the smallest of the sizes of the current stack size or the memory region size.
-/// 
+///
 /// If the memory region is too small, it will contain the top stack space and miss the bottom stack space.
 /// This is done because the top of the stack is often more interesting than the bottom.
 fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryRegion<SIZE>) {

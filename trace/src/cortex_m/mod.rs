@@ -149,7 +149,13 @@ impl<'data> UnwindingContext<'data> {
         while let Some(context_frame) = context_frames.next()? {
             let (file, line, column) = context_frame
                 .location
-                .map(|l| (l.file.map(|f| f.to_string()), l.line, l.column))
+                .map(|l| {
+                    (
+                        l.file.map(|f| f.to_string()),
+                        l.line.map(|line| line as _),
+                        l.column.map(|column| column as _),
+                    )
+                })
                 .unwrap_or_default();
 
             let mut variables = Vec::new();
@@ -180,9 +186,7 @@ impl<'data> UnwindingContext<'data> {
                     .function
                     .map(|f| f.demangle().ok().map(|f| f.into_owned()))
                     .flatten(),
-                file,
-                line,
-                column,
+                location: crate::Location { file, line, column },
                 frame_type: FrameType::InlineFunction,
                 variables,
             });
@@ -215,7 +219,7 @@ impl<'data> UnwindingContext<'data> {
         let unwind_info = match unwind_info {
             Ok(unwind_info) => unwind_info.clone(),
             Err(_e) => {
-                return Ok((Some(Frame { function: Some("Unknown".into()), file: None, line: None, column: None, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
+                return Ok((Some(Frame { function: Some("Unknown".into()), location: crate::Location { file: None, line: None, column: None }, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
                 1. compile the Rust code with `debug = 1` or higher. This is configured in the `profile.{{release,bench}}` sections of Cargo.toml (`profile.{{dev,test}}` default to `debug = 2`)
                 2. use a recent version of the `cortex-m` crates (e.g. cortex-m 0.6.3 or newer). Check versions in Cargo.lock
                 3. if linking to C code, compile the C code with the `-g` flag", self.device_memory.register(gimli::Arm::PC)?)),
@@ -230,9 +234,11 @@ impl<'data> UnwindingContext<'data> {
                 return Ok((
                     Some(Frame {
                         function: Some("Unknown".into()),
-                        file: None,
-                        line: None,
-                        column: None,
+                        location: crate::Location {
+                            file: None,
+                            line: None,
+                            column: None,
+                        },
                         frame_type: FrameType::Corrupted(e.to_string()),
                         variables: Vec::new(),
                     }),
@@ -254,9 +260,11 @@ impl<'data> UnwindingContext<'data> {
             return Ok((
                 Some(Frame {
                     function: Some("Unknown".into()),
-                    file: None,
-                    line: None,
-                    column: None,
+                    location: crate::Location {
+                        file: None,
+                        line: None,
+                        column: None,
+                    },
                     frame_type: FrameType::Corrupted(
                         "CFA did not change and LR and PC are equal".into(),
                     ),
@@ -279,9 +287,11 @@ impl<'data> UnwindingContext<'data> {
                     return Ok((
                         Some(Frame {
                             function: Some("Unknown".into()),
-                            file: None,
-                            line: None,
-                            column: None,
+                            location: crate::Location {
+                                file: None,
+                                line: None,
+                                column: None,
+                            },
                             frame_type: FrameType::Corrupted(format!(
                                 "LR contains invalid EXC_RETURN value {:#10X}",
                                 self.device_memory.register(gimli::Arm::LR)?
@@ -303,9 +313,11 @@ impl<'data> UnwindingContext<'data> {
                     return Ok((
                         Some(Frame {
                             function: Some("Unknown".into()),
-                            file: None,
-                            line: None,
-                            column: None,
+                            location: crate::Location {
+                                file: None,
+                                line: None,
+                                column: None,
+                            },
                             frame_type: FrameType::Corrupted(format!(
                                 "Could not read address {:#10X} from the stack",
                                 address
@@ -333,9 +345,11 @@ impl<'data> UnwindingContext<'data> {
             return Ok((
                 Some(Frame {
                     function: Some("RESET".into()),
-                    file: None,
-                    line: None,
-                    column: None,
+                    location: crate::Location {
+                        file: None,
+                        line: None,
+                        column: None,
+                    },
                     frame_type: FrameType::Function,
                     variables: Vec::new(),
                 }),
@@ -357,9 +371,7 @@ impl<'data> UnwindingContext<'data> {
             {
                 Ok((Some(Frame {
                     function: Some("Unknown".into()),
-                    file: None,
-                    line: None,
-                    column: None,
+                    location: crate::Location { file: None, line: None, column: None },
                     frame_type: FrameType::Corrupted(
                         format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", self.device_memory
                         .register(gimli::Arm::SP)?),
@@ -552,7 +564,7 @@ mod tests {
         device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
         device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
         device_memory.add_memory_region(VecMemoryRegion::from_iter(&mut dump_iter));
-        
+
         let frames = trace(device_memory, ELF).unwrap();
         for (i, frame) in frames.iter().enumerate() {
             println!("{}: {}", i, frame);

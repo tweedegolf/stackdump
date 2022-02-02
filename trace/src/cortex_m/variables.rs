@@ -1,6 +1,6 @@
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
-    Enumerator, StructureMember, TemplateTypeParam, Variable, VariableType, VariableKind,
+    Enumerator, Location, StructureMember, TemplateTypeParam, Variable, VariableKind, VariableType,
 };
 use addr2line::Context;
 use bitvec::prelude::*;
@@ -76,6 +76,74 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
 
     // Get the entries for the type
     Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
+}
+
+fn find_entry_location<'unit>(
+    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
+    unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+) -> Result<Location, TraceError> {
+    let variable_decl_file = entry
+        .attr_value(gimli::constants::DW_AT_decl_file)?
+        .map(|f| match f {
+            AttributeValue::FileIndex(index) => Some(index),
+            _ => None,
+        })
+        .flatten();
+    let variable_decl_line = entry
+        .attr_value(gimli::constants::DW_AT_decl_line)?
+        .map(|l| l.udata_value())
+        .flatten();
+    let variable_decl_column = entry
+        .attr_value(gimli::constants::DW_AT_decl_column)?
+        .map(|c| c.udata_value())
+        .flatten();
+
+    let variable_file = if let (Some(variable_decl_file), Some(line_program)) =
+        (variable_decl_file, unit.line_program.as_ref())
+    {
+        if let Some(file_entry) = line_program.header().file(variable_decl_file) {
+            let file = file_entry.path_name();
+            let file_name = context
+                .dwarf()
+                .attr_string(unit, file)?
+                .to_string()?
+                .into_owned();
+            if let Some(directory) = file_entry.directory(line_program.header()) {
+                let directory_path = context
+                    .dwarf()
+                    .attr_string(unit, directory)?
+                    .to_string()?
+                    .into_owned();
+
+                let compilation_directory = match unit.comp_dir.as_ref() {
+                    Some(comp_dir) => comp_dir.to_string()?,
+                    None => "".into(),
+                };
+
+                Some(format!(
+                    "{}{}{}{}{}",
+                    compilation_directory,
+                    std::path::MAIN_SEPARATOR,
+                    directory_path,
+                    std::path::MAIN_SEPARATOR,
+                    file_name
+                ))
+            } else {
+                Some(file_name)
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(Location {
+        file: variable_file,
+        line: variable_decl_line,
+        column: variable_decl_column,
+    })
 }
 
 fn find_type(
@@ -772,6 +840,14 @@ pub fn find_variables(
             variable_kind = variable_kind.and(VariableKind::Inlined);
         }
 
+        // Get the location of the variable
+        let mut variable_file_location = find_entry_location(context, unit, entry)?;
+        if let (None, Some(abstract_origin_entry)) =
+            (&variable_file_location.file, abstract_origin_entry)
+        {
+            variable_file_location = find_entry_location(context, unit, abstract_origin_entry)?;
+        }
+
         match (variable_name, variable_type) {
             (Ok(variable_name), Ok(variable_type)) if variable_type.get_variable_size() == 0 => {
                 variables.push(Variable {
@@ -779,6 +855,7 @@ pub fn find_variables(
                     kind: variable_kind,
                     value: Ok("{ (ZST) }".into()),
                     variable_type,
+                    file_location: variable_file_location,
                 })
             }
             (Ok(variable_name), Ok(variable_type)) => {
@@ -790,13 +867,8 @@ pub fn find_variables(
                 };
 
                 // Get the location of the variable
-                let variable_location = evaluate_location(
-                    context,
-                    unit,
-                    device_memory,
-                    location_attr,
-                    frame_base,
-                )?;
+                let variable_location =
+                    evaluate_location(context, unit, device_memory, location_attr, frame_base)?;
 
                 let variable_data =
                     get_variable_data(device_memory, &variable_type, variable_location);
@@ -812,6 +884,7 @@ pub fn find_variables(
                     kind: variable_kind,
                     value: variable_value,
                     variable_type,
+                    file_location: variable_file_location,
                 })
             }
             (Ok(variable_name), Err(type_error)) => {
