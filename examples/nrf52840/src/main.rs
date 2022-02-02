@@ -6,10 +6,10 @@ use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
-use stackdump_capture::stackdump_core::memory_region::ArrayVecMemoryRegion;
+use stackdump_capture::stackdump_core::memory_region::ArrayMemoryRegion;
 
 #[link_section = ".uninit"]
-static mut STACKDUMP: MaybeUninit<ArrayVecMemoryRegion<4096>> = MaybeUninit::uninit();
+static mut STACKDUMP: MaybeUninit<ArrayMemoryRegion<4096>> = MaybeUninit::uninit();
 
 const MESSAGES: [&'static str; 4] = [
     "I love you",
@@ -103,7 +103,7 @@ fn TIMER0() {
 
     unsafe {
         cortex_m::interrupt::free(|cs| {
-            let stack = STACKDUMP.write(ArrayVecMemoryRegion::default());
+            let stack = STACKDUMP.write(ArrayMemoryRegion::default());
             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture_with_fpu(stack, cs);
             rprintln!("{:2X?}", core_registers);
             rprintln!("{:2X?}", fpu_registers);

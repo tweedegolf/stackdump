@@ -2,10 +2,19 @@
 name = "stackdump-capture"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.59"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/tweedegolf/stackdump"
+repository = "https://github.com/tweedegolf/stackdump"
+readme = "../README.md"
+keywords = ["no_std", "stackdump"]
+categories = ["embedded", "no-std"]
+description = "Crate for capturing stack dumps"
 
 [dependencies]
 stackdump-core = { path = "../core", default-features = false }
 arrayvec = { version = "0.7.2", default-features = false }
 bare-metal = "0.2.5" # Using the old version because cortex-m still uses this
+
+[dev-dependencies]
+cortex-m = "0.7.4"

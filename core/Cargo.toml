@@ -2,8 +2,13 @@
 name = "stackdump-core"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/tweedegolf/stackdump"
+repository = "https://github.com/tweedegolf/stackdump"
+readme = "../README.md"
+keywords = ["no_std", "stackdump"]
+categories = ["embedded", "no-std"]
+description = "Crate for stack dump definitions"
 
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false, features = ["serde"] }

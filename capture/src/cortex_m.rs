@@ -1,29 +1,36 @@
-use stackdump_core::{memory_region::ArrayVecMemoryRegion, register_data::ArrayVecRegisterData};
+//! Capture functions for the cortex-m platform
 
+use stackdump_core::{memory_region::ArrayMemoryRegion, register_data::ArrayRegisterData};
+
+/// Capture the core registers and the stack
+#[cfg(not(has_fpu))]
 pub fn capture<const SIZE: usize>(
-    stack: &mut ArrayVecMemoryRegion<SIZE>,
+    stack: &mut ArrayMemoryRegion<SIZE>,
     _cs: &bare_metal::CriticalSection,
-) -> ArrayVecRegisterData<16, u32> {
+) -> ArrayRegisterData<16, u32> {
     let core_registers = capture_core_registers();
     capture_stack(core_registers.registers[13], stack);
     core_registers
 }
 
+/// Capture the core & fpu registers and the stack
 #[cfg(has_fpu)]
-pub fn capture_with_fpu<const SIZE: usize>(
-    stack: &mut ArrayVecMemoryRegion<SIZE>,
+pub fn capture<const SIZE: usize>(
+    stack: &mut ArrayMemoryRegion<SIZE>,
     _cs: &bare_metal::CriticalSection,
-) -> (ArrayVecRegisterData<16, u32>, ArrayVecRegisterData<32, u32>) {
+) -> (ArrayRegisterData<16, u32>, ArrayRegisterData<32, u32>) {
     let fpu_registers = capture_fpu_registers();
     (capture(stack, _cs), fpu_registers)
 }
 
-fn capture_core_registers() -> ArrayVecRegisterData<16, u32> {
+fn capture_core_registers() -> ArrayRegisterData<16, u32> {
     use core::arch::asm;
 
+    // This array is going to hold the register data
     let mut register_array = arrayvec::ArrayVec::new();
 
     unsafe {
+        // We've got 16 registers, so make space for that
         register_array.set_len(16);
 
         asm!(
@@ -44,20 +51,24 @@ fn capture_core_registers() -> ArrayVecRegisterData<16, u32> {
             "str lr, [{0}, #56]",
             "mov {tmp}, pc", // We can't use the str instruction with the PC register directly, so store it in tmp
             "str {tmp}, [{0}, #60]",
-            in(reg) register_array.as_mut_ptr(),
-            tmp = out(reg) _,
+            in(reg) register_array.as_mut_ptr(), // Every register is going to be written to an offset of this pointer
+            tmp = out(reg) _, // We need a temporary register
         );
     }
 
-    ArrayVecRegisterData::new(0, register_array)
+    // R0 is DWARF register 0
+    ArrayRegisterData::new(0, register_array)
 }
 
-fn capture_fpu_registers() -> ArrayVecRegisterData<32, u32> {
+#[cfg(has_fpu)]
+fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
     use core::arch::asm;
 
+    // This array is going to hold the register data
     let mut register_array = arrayvec::ArrayVec::new();
 
     unsafe {
+        // We've got 32 registers, so make space for that
         register_array.set_len(32);
 
         asm!(
@@ -93,14 +104,20 @@ fn capture_fpu_registers() -> ArrayVecRegisterData<32, u32> {
             "vstr s29, [{0}, #116]",
             "vstr s30, [{0}, #120]",
             "vstr s31, [{0}, #124]",
-            in(reg) register_array.as_mut_ptr(),
+            in(reg) register_array.as_mut_ptr(), // Every register is going to be written to an offset of this pointer
         );
     }
 
-    ArrayVecRegisterData::new(256, register_array)
+    // s0 is DWARF register 256
+    ArrayRegisterData::new(256, register_array)
 }
 
-fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayVecMemoryRegion<SIZE>) {
+/// Capture the stack from the current given stack pointer until the start of the stack into the given stack memory region.
+/// The captured stack will be the smallest of the sizes of the current stack size or the memory region size.
+/// 
+/// If the memory region is too small, it will contain the top stack space and miss the bottom stack space.
+/// This is done because the top of the stack is often more interesting than the bottom.
+fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryRegion<SIZE>) {
     extern "C" {
         static mut _stack_start: core::ffi::c_void;
     }

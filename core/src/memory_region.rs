@@ -25,12 +25,12 @@ pub trait MemoryRegion: Debug {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
-pub struct ArrayVecMemoryRegion<const SIZE: usize> {
+pub struct ArrayMemoryRegion<const SIZE: usize> {
     pub start_address: u64,
     pub data: ArrayVec<u8, SIZE>,
 }
 
-impl<const SIZE: usize> ArrayVecMemoryRegion<SIZE> {
+impl<const SIZE: usize> ArrayMemoryRegion<SIZE> {
     pub fn new(start_address: u64, data: ArrayVec<u8, SIZE>) -> Self {
         Self {
             start_address,
@@ -43,7 +43,7 @@ impl<const SIZE: usize> ArrayVecMemoryRegion<SIZE> {
     }
 }
 
-impl<const SIZE: usize> MemoryRegion for ArrayVecMemoryRegion<SIZE> {
+impl<const SIZE: usize> MemoryRegion for ArrayMemoryRegion<SIZE> {
     fn address_range(&self) -> Range<usize> {
         self.start_address as usize..(self.start_address as usize + self.data.len())
     }
@@ -59,7 +59,7 @@ impl<const SIZE: usize> MemoryRegion for ArrayVecMemoryRegion<SIZE> {
     }
 }
 
-impl<const SIZE: usize> FromIterator<u8> for ArrayVecMemoryRegion<SIZE> {
+impl<const SIZE: usize> FromIterator<u8> for ArrayMemoryRegion<SIZE> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 

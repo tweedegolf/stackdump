@@ -56,7 +56,7 @@ pub trait RegisterData<RB: RegisterBacking>: Debug {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
-pub struct ArrayVecRegisterData<const SIZE: usize, RB> {
+pub struct ArrayRegisterData<const SIZE: usize, RB> {
     /// The DWARF register number of the first register
     starting_register_number: u16,
     /// The values of the registers.
@@ -65,7 +65,7 @@ pub struct ArrayVecRegisterData<const SIZE: usize, RB> {
     pub registers: ArrayVec<RB, SIZE>,
 }
 
-impl<const SIZE: usize, RB: RegisterBacking> ArrayVecRegisterData<SIZE, RB> {
+impl<const SIZE: usize, RB: RegisterBacking> ArrayRegisterData<SIZE, RB> {
     pub fn new(starting_register_number: u16, registers: ArrayVec<RB, SIZE>) -> Self {
         Self {
             starting_register_number,
@@ -82,7 +82,7 @@ impl<const SIZE: usize, RB: RegisterBacking> ArrayVecRegisterData<SIZE, RB> {
     }
 }
 
-impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayVecRegisterData<SIZE, RB> {
+impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterData<SIZE, RB> {
     #[cfg(feature = "std")]
     fn register(&self, register: gimli::Register) -> Option<RB> {
         let local_register_index = register.0.checked_sub(self.starting_register_number)?;
@@ -100,7 +100,7 @@ impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayVecRegist
     }
 }
 
-impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayVecRegisterData<SIZE, RB> {
+impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterData<SIZE, RB> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
