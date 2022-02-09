@@ -95,7 +95,7 @@
 //! fn panic(_info: &core::panic::PanicInfo) -> ! {
 //!     cortex_m::interrupt::free(|cs| {
 //!         unsafe {
-//!             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(STACK_CAPTURE.assume_init_mut(), &cs);
+//!             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(&mut *STACK_CAPTURE.as_mut_ptr(), &cs);
 //!             CORE_REGISTERS_CAPTURE.write(core_registers);
 //!             CORE_REGISTERS_CAPTURE.write(fpu_registers);
 //!

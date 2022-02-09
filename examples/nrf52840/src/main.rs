@@ -103,12 +103,12 @@ fn TIMER0() {
     timer.events_compare[0].write(|w| w);
 
     unsafe {
-        cortex_m::interrupt::free(|cs| {
-            let stack = STACKDUMP.write(ArrayMemoryRegion::default());
+        cortex_m::interrupt::free(|cs| {   
+            let stack = &mut *STACKDUMP.as_mut_ptr();
             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(stack, cs);
             rprintln!("{:2X?}", core_registers);
             rprintln!("{:2X?}", fpu_registers);
-            rprintln!("Start of stack: {:#010X}", stack.address_range().start);
+            rprintln!("Stack range: {:#010X?}", stack.address_range());
 
             for byte in core_registers.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
