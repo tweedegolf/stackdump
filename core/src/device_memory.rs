@@ -11,7 +11,13 @@ use std::{fmt::Display, ops::Range};
 pub struct MissingRegisterError(gimli::Register);
 impl Display for MissingRegisterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Missing register: {}", self.0 .0)
+        write!(
+            f,
+            "Missing register: {}",
+            gimli::Arm::register_name(self.0)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| format!("{}", self.0 .0))
+        )
     }
 }
 impl std::error::Error for MissingRegisterError {}
