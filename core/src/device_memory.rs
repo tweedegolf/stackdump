@@ -1,10 +1,12 @@
-use std::{fmt::Display, ops::Range};
+//! Module containing the definitions for device memory, a summation of all available memory that was captured
 
 use crate::{
     memory_region::MemoryRegion,
     register_data::{RegisterBacking, RegisterData},
 };
+use std::{fmt::Display, ops::Range};
 
+/// An error to signal that a register is not present
 #[derive(Debug, Clone, Copy)]
 pub struct MissingRegisterError(gimli::Register);
 impl Display for MissingRegisterError {
@@ -21,6 +23,7 @@ pub struct DeviceMemory<RB: RegisterBacking> {
 }
 
 impl<RB: RegisterBacking> DeviceMemory<RB> {
+    /// Creates a new instance of the device memory
     pub fn new() -> Self {
         Self {
             register_data: Vec::new(),
@@ -28,53 +31,62 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
         }
     }
 
+    /// Adds a memory region to the device memory
     pub fn add_memory_region<M: MemoryRegion + 'static>(&mut self, region: M) {
         self.memory_regions.push(Box::new(region));
     }
+    /// Adds a memory region to the device memory
     pub fn add_memory_region_boxed(&mut self, region: Box<dyn MemoryRegion>) {
         self.memory_regions.push(region);
     }
-
+    /// Adds register data to the device memory
     pub fn add_register_data<RD: RegisterData<RB> + 'static>(&mut self, data: RD) {
         self.register_data.push(Box::new(data));
     }
+    /// Adds register data to the device memory
     pub fn add_register_data_boxed(&mut self, data: Box<dyn RegisterData<RB>>) {
         self.register_data.push(data);
     }
 
-    pub fn read_slice(&self, index: Range<usize>) -> Option<&[u8]> {
-        let index = &index;
+    /// Returns the slice of memory that can be found at the given address_range.
+    /// If the given address range is not fully within one of the captured regions present in the device memory, then None is returned.
+    pub fn read_slice<'a>(&'a self, address_range: Range<u64>) -> Option<&'a [u8]> {
         self.memory_regions
             .iter()
-            .find_map(|mr| mr.read_slice(index.clone()))
+            .find_map(|mr| mr.read_slice(address_range.clone()))
     }
 
-    pub fn read_u8(&self, index: usize) -> Option<u8> {
-        self.read_slice(index..index + 1).map(|b| b[0])
+    /// Reads a byte from the given address if it is present in one of the captured regions present in the device memory
+    pub fn read_u8(&self, address: u64) -> Option<u8> {
+        self.memory_regions
+            .iter()
+            .find_map(|mr| mr.read_u8(address))
     }
 
-    pub fn read_u32(&self, index: usize, endianness: gimli::RunTimeEndian) -> Option<u32> {
-        let slice = self.read_slice(index..index + 4)?.try_into().unwrap();
-
-        if gimli::Endianity::is_little_endian(endianness) {
-            Some(u32::from_le_bytes(slice))
-        } else {
-            Some(u32::from_be_bytes(slice))
-        }
+    /// Reads a u32 from the given address if it is present in one of the captured regions present in the device memory
+    pub fn read_u32(&self, address: u64, endianness: gimli::RunTimeEndian) -> Option<u32> {
+        self.memory_regions
+            .iter()
+            .find_map(|mr| mr.read_u32(address, endianness))
     }
 
+    /// Try to get the value of the given register. Returns an error if the register is not present in any of the register collections.
     pub fn register(&self, register: gimli::Register) -> Result<RB, MissingRegisterError> {
         self.register_data
             .iter()
             .find_map(|registers| registers.register(register))
             .ok_or_else(|| MissingRegisterError(register))
     }
+
+    /// Try to get a reference to the given register. Returns an error if the register is not present in any of the register collections.
     pub fn register_ref(&self, register: gimli::Register) -> Result<&RB, MissingRegisterError> {
         self.register_data
             .iter()
             .find_map(|registers| registers.register_ref(register))
             .ok_or_else(|| MissingRegisterError(register))
     }
+
+    /// Try to get a mutable reference to the given register. Returns an error if the register is not present in any of the register collections.
     pub fn register_mut(
         &mut self,
         register: gimli::Register,

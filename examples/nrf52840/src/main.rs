@@ -6,7 +6,8 @@ use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
-use stackdump_capture::stackdump_core::memory_region::ArrayMemoryRegion;
+use stackdump_capture::core::memory_region::{ArrayMemoryRegion, MemoryRegion};
+use stackdump_capture::core::register_data::RegisterData;
 
 #[link_section = ".uninit"]
 static mut STACKDUMP: MaybeUninit<ArrayMemoryRegion<4096>> = MaybeUninit::uninit();
@@ -104,18 +105,18 @@ fn TIMER0() {
     unsafe {
         cortex_m::interrupt::free(|cs| {
             let stack = STACKDUMP.write(ArrayMemoryRegion::default());
-            let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture_with_fpu(stack, cs);
+            let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(stack, cs);
             rprintln!("{:2X?}", core_registers);
             rprintln!("{:2X?}", fpu_registers);
-            rprintln!("Start of stack: {:#010X}", stack.start_address);
+            rprintln!("Start of stack: {:#010X}", stack.address_range().start);
 
-            for byte in core_registers.iter() {
+            for byte in core_registers.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
-            for byte in fpu_registers.iter() {
+            for byte in fpu_registers.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
-            for byte in stack.iter() {
+            for byte in stack.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
         });

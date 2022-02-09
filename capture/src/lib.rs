@@ -138,4 +138,4 @@
 
 #[cfg(any(cortex_m, doc))]
 pub mod cortex_m;
-pub use stackdump_core;
+pub use stackdump_core as core;

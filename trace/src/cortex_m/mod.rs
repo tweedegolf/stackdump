@@ -364,7 +364,7 @@ impl<'data> UnwindingContext<'data> {
             if self
                 .device_memory
                 .read_u32(
-                    self.device_memory.register(gimli::Arm::SP)? as usize,
+                    self.device_memory.register(gimli::Arm::SP)? as u64,
                     RunTimeEndian::Little,
                 )
                 .is_none()
@@ -404,10 +404,10 @@ impl<'data> UnwindingContext<'data> {
                 RegisterRule::Undefined => unreachable!(),
                 RegisterRule::Offset(offset) => {
                     let cfa = self.device_memory.register(gimli::Arm::SP)?;
-                    let addr = (i64::from(cfa) + offset) as u32;
+                    let addr = (i64::from(cfa) + offset) as u64;
                     let new_value = self
                         .device_memory
-                        .read_u32(addr as usize, RunTimeEndian::Little)
+                        .read_u32(addr, RunTimeEndian::Little)
                         .ok_or(format!("Address {:#010X} not within stack space", addr))?;
                     *self.device_memory.register_mut(*reg)? = new_value;
                 }
@@ -439,7 +439,7 @@ impl<'data> UnwindingContext<'data> {
             index: usize,
         ) -> Result<u32, TraceError> {
             device_memory
-                .read_u32(starting_sp as usize + index * 4, RunTimeEndian::Little)
+                .read_u32(starting_sp as u64 + index as u64 * 4, RunTimeEndian::Little)
                 .ok_or(TraceError::MissingMemory(
                     starting_sp as u64 + index as u64 * 4,
                 ))

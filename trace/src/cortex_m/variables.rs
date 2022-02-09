@@ -450,7 +450,7 @@ fn get_piece_data(
                 .map_err(|e| e.to_string())?,
         ),
         gimli::Location::Address { address } => device_memory
-            .read_slice(address as usize..(address + variable_size) as usize)
+            .read_slice(address..(address + variable_size))
             .map(|b| b.view_bits().to_bitvec()),
         gimli::Location::Value { value } => {
             let mut data = BitVec::new();
@@ -618,8 +618,8 @@ fn read_variable(
         }
         VariableType::PointerType { pointee_type, .. } => {
             // Cortex m, so pointer is little endian u32
-            let address = data.load_le::<u32>() as usize;
-            let pointee_size = pointee_type.get_variable_size() as usize;
+            let address = data.load_le::<u32>() as u64;
+            let pointee_size = pointee_type.get_variable_size() as u64;
             let pointee_memory = device_memory.read_slice(address..(address + pointee_size));
 
             let pointee_value = match pointee_memory {
@@ -695,10 +695,9 @@ fn read_variable(
                 match (pointer, length) {
                     (Some(pointer), Some(length)) => {
                         let pointer_address = data[pointer.member_location as usize * 8..][..32]
-                            .load_le::<u32>()
-                            as usize;
+                            .load_le::<u32>() as u64;
                         let length_value = data[length.member_location as usize * 8..][..32]
-                            .load_le::<u32>() as usize;
+                            .load_le::<u32>() as u64;
                         let string_contents = device_memory
                             .read_slice(pointer_address..(pointer_address + length_value));
 

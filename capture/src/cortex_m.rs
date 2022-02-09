@@ -1,6 +1,10 @@
 //! Capture functions for the cortex-m platform
 
-use stackdump_core::{memory_region::ArrayMemoryRegion, register_data::ArrayRegisterData};
+use stackdump_core::register_data::RegisterData;
+use stackdump_core::{
+    memory_region::{ArrayMemoryRegion, MemoryRegion},
+    register_data::ArrayRegisterData,
+};
 
 /// Capture the core registers and the stack
 #[cfg(not(has_fpu))]
@@ -9,7 +13,12 @@ pub fn capture<const SIZE: usize>(
     _cs: &bare_metal::CriticalSection,
 ) -> ArrayRegisterData<16, u32> {
     let core_registers = capture_core_registers();
-    capture_stack(core_registers.registers[13], stack);
+    capture_stack(
+        core_registers
+            .register(stackdump_core::gimli::Arm::SP)
+            .unwrap(),
+        stack,
+    );
     core_registers
 }
 
@@ -19,8 +28,15 @@ pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
     _cs: &bare_metal::CriticalSection,
 ) -> (ArrayRegisterData<16, u32>, ArrayRegisterData<32, u32>) {
+    let core_registers = capture_core_registers();
     let fpu_registers = capture_fpu_registers();
-    (capture(stack, _cs), fpu_registers)
+    capture_stack(
+        core_registers
+            .register(stackdump_core::gimli::Arm::SP)
+            .unwrap(),
+        stack,
+    );
+    (core_registers, fpu_registers)
 }
 
 fn capture_core_registers() -> ArrayRegisterData<16, u32> {
@@ -56,8 +72,7 @@ fn capture_core_registers() -> ArrayRegisterData<16, u32> {
         );
     }
 
-    // R0 is DWARF register 0
-    ArrayRegisterData::new(0, register_array)
+    ArrayRegisterData::new(stackdump_core::gimli::Arm::R0, register_array)
 }
 
 #[cfg(has_fpu)]
@@ -108,8 +123,7 @@ fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
         );
     }
 
-    // s0 is DWARF register 256
-    ArrayRegisterData::new(256, register_array)
+    ArrayRegisterData::new(stackdump_core::gimli::Arm::S0, register_array)
 }
 
 /// Capture the stack from the current given stack pointer until the start of the stack into the given stack memory region.
@@ -128,17 +142,6 @@ fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryR
         unsafe { &_stack_start as *const _ as u32 }
     }
 
-    stack.start_address = stack_pointer as u64;
-    stack.data.clear();
-    let stack_size = stack_start()
-        .saturating_sub(stack_pointer)
-        .min(stack.data.capacity() as u32);
-
-    unsafe {
-        stack.data.set_len(stack_size as usize);
-        stack
-            .data
-            .as_mut_ptr()
-            .copy_from(stack_pointer as *const u8, stack_size as usize);
-    }
+    let stack_size = stack_start().saturating_sub(stack_pointer).min(SIZE as u32);
+    stack.copy_from_memory(stack_pointer as *const u8, stack_size as usize);
 }
