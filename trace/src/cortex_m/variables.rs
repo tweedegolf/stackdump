@@ -99,39 +99,67 @@ fn find_entry_location<'unit>(
         .map(|c| c.udata_value())
         .flatten();
 
+    fn path_push(path: &mut String, p: &str) {
+        /// Check if the path in the given string has a unix style root
+        fn has_unix_root(p: &str) -> bool {
+            p.starts_with('/')
+        }
+
+        /// Check if the path in the given string has a windows style root
+        fn has_windows_root(p: &str) -> bool {
+            p.starts_with('\\') || p.get(1..3) == Some(":\\")
+        }
+
+        if has_unix_root(p) || has_windows_root(p) {
+            *path = p.to_string();
+        } else {
+            let dir_separator = if has_windows_root(path.as_str()) {
+                '\\'
+            } else {
+                '/'
+            };
+
+            if !path.ends_with(dir_separator) {
+                path.push(dir_separator);
+            }
+            *path += p;
+        }
+    }
+
     let variable_file = if let (Some(variable_decl_file), Some(line_program)) =
         (variable_decl_file, unit.line_program.as_ref())
     {
         if let Some(file_entry) = line_program.header().file(variable_decl_file) {
-            let file = file_entry.path_name();
-            let file_name = context
-                .dwarf()
-                .attr_string(unit, file)?
-                .to_string()?
-                .into_owned();
-            if let Some(directory) = file_entry.directory(line_program.header()) {
-                let directory_path = context
-                    .dwarf()
-                    .attr_string(unit, directory)?
-                    .to_string()?
-                    .into_owned();
-
-                let compilation_directory = match unit.comp_dir.as_ref() {
-                    Some(comp_dir) => comp_dir.to_string()?,
-                    None => "".into(),
-                };
-
-                Some(format!(
-                    "{}{}{}{}{}",
-                    compilation_directory,
-                    std::path::MAIN_SEPARATOR,
-                    directory_path,
-                    std::path::MAIN_SEPARATOR,
-                    file_name
-                ))
+            let mut path = if let Some(comp_dir) = &unit.comp_dir {
+                comp_dir.to_string_lossy()?.into_owned()
             } else {
-                Some(file_name)
+                String::new()
+            };
+
+            // The directory index 0 is defined to correspond to the compilation unit directory
+            if variable_decl_file != 0 {
+                if let Some(directory) = file_entry.directory(line_program.header()) {
+                    path_push(
+                        &mut path,
+                        &context
+                            .dwarf()
+                            .attr_string(unit, directory)?
+                            .to_string_lossy()?
+                            .into_owned(),
+                    )
+                }
             }
+
+            path_push(
+                &mut path,
+                &context
+                    .dwarf()
+                    .attr_string(unit, file_entry.path_name())?
+                    .to_string()?
+                    .into_owned(),
+            );
+
+            Some(path)
         } else {
             None
         }
@@ -261,7 +289,7 @@ fn find_type(
             })
         }
         gimli::constants::DW_TAG_pointer_type => {
-            let name = get_entry_name(context, unit, entry)?;
+            let name = get_entry_name(context, unit, entry);
             let pointee_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
                 |mut type_tree| {
                     type_tree
@@ -270,8 +298,11 @@ fn find_type(
                 },
             )???;
 
+            // Some pointers don't have names, but generally it is just `&<typename>`
+            // So if only the name is missing, we can recover
+
             Ok(VariableType::PointerType {
-                name,
+                name: name.unwrap_or_else(|_| format!("&{}", pointee_type.get_first_level_name())),
                 pointee_type: Box::new(pointee_type),
             })
         }
