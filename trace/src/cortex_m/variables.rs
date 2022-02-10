@@ -1,3 +1,11 @@
+//! A module containing functions for finding and reading the variables of frames.
+//! 
+//! These are (almost) all pure functions that get all of their context through the parameters.
+//! This was decided because the datastructures that are involved are pretty complex and I didn't
+//! want to add complexity.
+//! All functions can be reasoned with on the function level.
+//! 
+
 use super::TraceError;
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
