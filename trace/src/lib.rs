@@ -101,7 +101,7 @@ impl Display for Frame {
         writeln!(f, "{} ({:?})", self.function, self.frame_type)?;
 
         let location_text = self.location.to_string();
-        if location_text.len() > 0 {
+        if !location_text.is_empty(){
             writeln!(f, "  at {}", location_text)?;
         }
 
@@ -148,12 +148,12 @@ pub struct Variable {
 impl Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut kind_text = self.kind.to_string();
-        if kind_text.len() > 0 {
+        if !kind_text.is_empty() {
             kind_text = format!("({}) ", kind_text);
         }
 
         let mut location_text = self.location.to_string();
-        if location_text.len() > 0 {
+        if !location_text.is_empty() {
             location_text = format!(" at {}", location_text);
         }
 

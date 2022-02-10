@@ -36,7 +36,7 @@ impl<'data> UnwindingContext<'data> {
 
         let debug_info_sector_data = elf
             .section_by_name(".debug_frame")
-            .ok_or(TraceError::MissingElfSection(".debug_frame".into()))?
+            .ok_or_else(|| TraceError::MissingElfSection(".debug_frame".into()))?
             .data()?;
         let mut debug_frame =
             addr2line::gimli::DebugFrame::new(debug_info_sector_data, LittleEndian);
@@ -44,7 +44,7 @@ impl<'data> UnwindingContext<'data> {
 
         let vector_table_section = elf
             .section_by_name(".vector_table")
-            .ok_or(TraceError::MissingElfSection(".vector_table".into()))?;
+            .ok_or_else(|| TraceError::MissingElfSection(".vector_table".into()))?;
         let vector_table = vector_table_section
             .data()?
             .chunks_exact(4)
@@ -61,16 +61,18 @@ impl<'data> UnwindingContext<'data> {
             .unwrap_or(reset_vector_address..reset_vector_address);
         let text_section = elf
             .section_by_name(".text")
-            .ok_or(TraceError::MissingElfSection(".text".into()))?;
+            .ok_or_else(|| TraceError::MissingElfSection(".text".into()))?;
         let text_address_range = (text_section.address() as u32)
             ..(text_section.address() as u32 + text_section.size() as u32);
 
         let bases = BaseAddresses::default();
         let unwind_context = UnwindContext::new();
 
-        for section in elf.sections().filter(|section| match section.kind() {
-            SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => true,
-            _ => false,
+        for section in elf.sections().filter(|section| {
+            matches!(
+                section.kind(),
+                SectionKind::Text | SectionKind::ReadOnlyData | SectionKind::ReadOnlyString
+            )
         }) {
             device_memory.add_memory_region(VecMemoryRegion::new(
                 section.address(),
@@ -146,8 +148,7 @@ impl<'data> UnwindingContext<'data> {
             frames.push(Frame {
                 function: context_frame
                     .function
-                    .map(|f| f.demangle().ok().map(|f| f.into_owned()))
-                    .flatten()
+                    .and_then(|f| f.demangle().ok().map(|f| f.into_owned()))
                     .unwrap_or_else(|| "UNKNOWN".into()),
                 location: crate::Location { file, line, column },
                 frame_type: FrameType::InlineFunction,

@@ -56,7 +56,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
 
     /// Returns the slice of memory that can be found at the given address_range.
     /// If the given address range is not fully within one of the captured regions present in the device memory, then None is returned.
-    pub fn read_slice<'a>(&'a self, address_range: Range<u64>) -> Option<&'a [u8]> {
+    pub fn read_slice(&self, address_range: Range<u64>) -> Option<&[u8]> {
         self.memory_regions
             .iter()
             .find_map(|mr| mr.read_slice(address_range.clone()))
@@ -81,7 +81,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
         self.register_data
             .iter()
             .find_map(|registers| registers.register(register))
-            .ok_or_else(|| MissingRegisterError(register))
+            .ok_or(MissingRegisterError(register))
     }
 
     /// Try to get a reference to the given register. Returns an error if the register is not present in any of the register collections.
@@ -89,7 +89,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
         self.register_data
             .iter()
             .find_map(|registers| registers.register_ref(register))
-            .ok_or_else(|| MissingRegisterError(register))
+            .ok_or(MissingRegisterError(register))
     }
 
     /// Try to get a mutable reference to the given register. Returns an error if the register is not present in any of the register collections.
@@ -100,7 +100,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
         self.register_data
             .iter_mut()
             .find_map(|registers| registers.register_mut(register))
-            .ok_or_else(|| MissingRegisterError(register))
+            .ok_or(MissingRegisterError(register))
     }
 }
 

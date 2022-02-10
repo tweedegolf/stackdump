@@ -42,7 +42,7 @@ pub trait RegisterData<RB: RegisterBacking>: Debug {
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// ```
-    fn bytes<'a>(&'a self) -> RegisterDataBytesIterator<'a, RB>;
+    fn bytes(&self) -> RegisterDataBytesIterator<RB>;
 }
 
 /// A collection of registers, backed by a stack allocated array.
@@ -85,7 +85,7 @@ impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterD
         self.registers.get_mut(local_register_index as usize)
     }
 
-    fn bytes<'a>(&'a self) -> RegisterDataBytesIterator<'a, RB> {
+    fn bytes(&self) -> RegisterDataBytesIterator<RB> {
         RegisterDataBytesIterator {
             index: 0,
             starting_register_number: self.starting_register_number,
@@ -181,7 +181,7 @@ impl<RB: RegisterBacking> RegisterData<RB> for VecRegisterData<RB> {
         self.registers.get_mut(local_register_index as usize)
     }
 
-    fn bytes<'a>(&'a self) -> RegisterDataBytesIterator<'a, RB> {
+    fn bytes(&self) -> RegisterDataBytesIterator<RB> {
         RegisterDataBytesIterator {
             index: 0,
             starting_register_number: self.starting_register_number,

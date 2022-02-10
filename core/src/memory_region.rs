@@ -12,10 +12,6 @@ pub trait MemoryRegion: Debug {
     /// Returns the slice of memory that can be found at the given address_range.
     /// If the given address range is not fully within the captured region, then None is returned.
     fn read_slice(&self, address_range: Range<u64>) -> Option<&[u8]>;
-    /// Returns the size of the region
-    fn len(&self) -> u64 {
-        self.address_range().end - self.address_range().start
-    }
 
     /// Reads a byte from the given address if it is present in the region
     fn read_u8(&self, address: u64) -> Option<u8> {
@@ -62,7 +58,12 @@ pub trait MemoryRegion: Debug {
     /// Clears the existing memory data and copies the new data from the given pointer
     ///
     /// If the data_len is greater than the capacity of this memory region, then this function will panic.
-    fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize);
+    /// 
+    /// ## Safety
+    /// 
+    /// The entire block of memory from `data_ptr .. data_ptr + data_len` must be readable.
+    /// (A memcpy must be possible with the pointer as source)
+    unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize);
 }
 
 /// A memory region that is backed by a stack allocated array
@@ -97,16 +98,14 @@ impl<const SIZE: usize> MemoryRegion for ArrayMemoryRegion<SIZE> {
         MemoryRegionIterator::new(self.start_address, &self.data)
     }
 
-    fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
+    unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
         self.start_address = data_ptr as u64;
         self.data.clear();
 
         assert!(data_len <= self.data.capacity());
 
-        unsafe {
-            self.data.set_len(data_len);
-            self.data.as_mut_ptr().copy_from(data_ptr, data_len);
-        }
+        self.data.set_len(data_len);
+        self.data.as_mut_ptr().copy_from(data_ptr, data_len);
     }
 }
 
@@ -186,14 +185,12 @@ impl MemoryRegion for VecMemoryRegion {
         MemoryRegionIterator::new(self.start_address, &self.data)
     }
 
-    fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
+    unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
         self.start_address = data_ptr as u64;
         self.data.clear();
         self.data.resize(data_len, 0);
 
-        unsafe {
-            self.data.as_mut_ptr().copy_from(data_ptr, data_len);
-        }
+        self.data.as_mut_ptr().copy_from(data_ptr, data_len);
     }
 }
 

@@ -13,10 +13,12 @@ use std::{ops::Deref, rc::Rc};
 
 use super::TraceError;
 
+type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
+
 fn get_entry_name(
-    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-    unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    context: &Context<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<String, TraceError> {
     // Find the attribute
     let name_attr = entry.required_attr(unit, gimli::constants::DW_AT_name)?;
@@ -27,10 +29,10 @@ fn get_entry_name(
 }
 
 fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
-    unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    unit: &'unit Unit<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
-    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-) -> Result<Option<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>>, TraceError>
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
+) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, TraceError>
 {
     // Find the attribute
     let abstract_origin_attr = entry.attr(gimli::constants::DW_AT_abstract_origin)?;
@@ -57,10 +59,10 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
 }
 
 fn get_entry_type_reference_tree<'abbrev, 'unit>(
-    unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    unit: &'unit Unit<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
-    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-) -> Result<EntriesTree<'abbrev, 'unit, EndianReader<RunTimeEndian, Rc<[u8]>>>, TraceError> {
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
+) -> Result<EntriesTree<'abbrev, 'unit, DefaultReader>, TraceError> {
     // Find the attribute
     let type_attr = entry.required_attr(unit, gimli::constants::DW_AT_type)?;
 
@@ -79,25 +81,22 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
 }
 
 fn find_entry_location<'unit>(
-    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-    unit: &'unit Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
-    entry: &DebuggingInformationEntry<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    context: &Context<DefaultReader>,
+    unit: &'unit Unit<DefaultReader, usize>,
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<Location, TraceError> {
     let variable_decl_file = entry
         .attr_value(gimli::constants::DW_AT_decl_file)?
-        .map(|f| match f {
+        .and_then(|f| match f {
             AttributeValue::FileIndex(index) => Some(index),
             _ => None,
-        })
-        .flatten();
+        });
     let variable_decl_line = entry
         .attr_value(gimli::constants::DW_AT_decl_line)?
-        .map(|l| l.udata_value())
-        .flatten();
+        .and_then(|l| l.udata_value());
     let variable_decl_column = entry
         .attr_value(gimli::constants::DW_AT_decl_column)?
-        .map(|c| c.udata_value())
-        .flatten();
+        .and_then(|c| c.udata_value());
 
     fn path_push(path: &mut String, p: &str) {
         /// Check if the path in the given string has a unix style root
@@ -144,8 +143,7 @@ fn find_entry_location<'unit>(
                         &context
                             .dwarf()
                             .attr_string(unit, directory)?
-                            .to_string_lossy()?
-                            .into_owned(),
+                            .to_string_lossy()?,
                     )
                 }
             }
@@ -155,8 +153,7 @@ fn find_entry_location<'unit>(
                 &context
                     .dwarf()
                     .attr_string(unit, file_entry.path_name())?
-                    .to_string()?
-                    .into_owned(),
+                    .to_string()?,
             );
 
             Some(path)
@@ -175,10 +172,10 @@ fn find_entry_location<'unit>(
 }
 
 fn find_type(
-    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-    unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    context: &Context<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
-    node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
+    node: gimli::EntriesTreeNode<DefaultReader>,
 ) -> Result<VariableType, TraceError> {
     let entry = node.entry();
     let entry_tag = entry.tag().to_string();
@@ -319,13 +316,12 @@ fn find_type(
 
             let byte_size = entry
                 .attr(gimli::constants::DW_AT_byte_size)?
-                .map(|bsize| bsize.udata_value())
-                .flatten();
+                .and_then(|bsize| bsize.udata_value());
 
             let mut children = node.children();
             let child = children
                 .next()?
-                .ok_or_else(|| TraceError::ExpectedChildNotPresent { entry_tag })?;
+                .ok_or(TraceError::ExpectedChildNotPresent { entry_tag })?;
             let child_entry = child.entry();
 
             let lower_bound = child_entry
@@ -402,10 +398,10 @@ fn find_type(
 }
 
 fn evaluate_location(
-    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-    unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    context: &Context<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
     device_memory: &DeviceMemory<u32>,
-    location: Option<Attribute<EndianReader<RunTimeEndian, Rc<[u8]>>>>,
+    location: Option<Attribute<DefaultReader>>,
     frame_base: Option<u32>,
 ) -> Result<VariableLocationResult, TraceError> {
     let location = match location {
@@ -454,7 +450,7 @@ fn evaluate_location(
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
                 result = location_evaluation.resume_with_frame_base(
-                    frame_base.ok_or_else(|| TraceError::UnknownFrameBase)? as u64,
+                    frame_base.ok_or(TraceError::UnknownFrameBase)? as u64,
                 )?;
             }
             r => return Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(r)),
@@ -471,7 +467,7 @@ fn evaluate_location(
 
 fn get_piece_data(
     device_memory: &DeviceMemory<u32>,
-    piece: Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    piece: Piece<DefaultReader, usize>,
     variable_size: u64,
 ) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, String> {
     let mut data = match piece.location.clone() {
@@ -623,8 +619,7 @@ fn read_variable(
             gimli::constants::DW_ATE_boolean => Ok(format!("{}", data.iter().any(|v| *v))),
             t => Err(format!(
                 "Unimplemented BaseType encoding {} - data: {:X?}",
-                t.to_string(),
-                data
+                t, data
             )),
         }
     }
@@ -787,16 +782,16 @@ fn read_variable(
                 }
             }
         }
-        VariableType::Subroutine => Ok(format!("_")),
+        VariableType::Subroutine => Ok("_".into()),
     }
 }
 
 pub fn find_variables(
-    context: &Context<EndianReader<RunTimeEndian, Rc<[u8]>>>,
-    unit: &Unit<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>,
+    context: &Context<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     device_memory: &DeviceMemory<u32>,
-    node: gimli::EntriesTreeNode<EndianReader<RunTimeEndian, Rc<[u8]>>>,
+    node: gimli::EntriesTreeNode<DefaultReader>,
     variables: &mut Vec<Variable>,
     mut frame_base: Option<u32>,
 ) -> Result<(), TraceError> {
@@ -823,9 +818,8 @@ pub fn find_variables(
         },
         frame_base_location,
     );
-    match frame_base_data {
-        Ok(data) => frame_base = Some(data.load_le()),
-        Err(_) => {}
+    if let Ok(data) = frame_base_data {
+        frame_base = Some(data.load_le())
     }
 
     if entry.tag() == gimli::constants::DW_TAG_variable
@@ -835,8 +829,7 @@ pub fn find_variables(
             get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
         let abstract_origin_node = abstract_origin_tree
             .as_mut()
-            .map(|tree| tree.root().ok())
-            .flatten();
+            .and_then(|tree| tree.root().ok());
         let abstract_origin_entry = abstract_origin_node.as_ref().map(|node| node.entry());
 
         // Get the name of the variable
@@ -964,7 +957,7 @@ enum VariableLocationResult {
     /// This variable is not present in memory at this point
     NoLocationFound,
     /// A required step of the location evaluation logic has not been implemented yet
-    LocationEvaluationStepNotImplemented(EvaluationResult<EndianReader<RunTimeEndian, Rc<[u8]>>>),
+    LocationEvaluationStepNotImplemented(EvaluationResult<DefaultReader>),
     /// The variable is split up into multiple pieces of memory
-    LocationsFound(Vec<Piece<EndianReader<RunTimeEndian, Rc<[u8]>>, usize>>),
+    LocationsFound(Vec<Piece<DefaultReader, usize>>),
 }
