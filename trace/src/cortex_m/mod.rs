@@ -1,57 +1,19 @@
+//! Trace implementation for the cortex m target
+
+use crate::error::TraceError;
 use crate::{Frame, FrameType};
 use addr2line::{
-    object::{self, File, Object, ObjectSection, ObjectSymbol, SectionKind},
+    object::{File, Object, ObjectSection, ObjectSymbol, SectionKind},
     Context,
 };
+use core::ops::Range;
 use gimli::{
     BaseAddresses, CfaRule, DebugFrame, EndianRcSlice, EndianSlice, LittleEndian, RegisterRule,
     RunTimeEndian, UnwindContext, UnwindSection, UnwindTableRow,
 };
-use stackdump_core::{
-    device_memory::{DeviceMemory, MissingRegisterError},
-    memory_region::VecMemoryRegion,
-};
-use std::{error::Error, ops::Range};
-use thiserror::Error;
+use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion};
 
 mod variables;
-
-#[derive(Error, Debug)]
-pub enum TraceError {
-    #[error("The elf file does not contain the required `{0}` section")]
-    MissingElfSection(String),
-    #[error("The elf file could not be read: {0}")]
-    ObjectReadError(#[from] object::Error),
-    #[error("An IO error occured: {0}")]
-    IOError(#[from] std::io::Error),
-    #[error("Some debug information could not be parsed: {0}")]
-    DebugParseError(#[from] gimli::Error),
-    #[error("An entry ({entry_tag} (@ .debug_info offset {entry_debug_info_offset:X?})) is missing an expected attribute: {attribute_name}")]
-    MissingAttribute {
-        entry_debug_info_offset: Option<u64>,
-        entry_tag: String,
-        attribute_name: String,
-    },
-    #[error("An attribute ({attribute_name}) has the wrong value type: {value_type_name}")]
-    WrongAttributeValueType {
-        attribute_name: String,
-        value_type_name: &'static str,
-    },
-    #[error("The type `{type_name}` has not been implemented yet")]
-    TypeNotImplemented { type_name: String },
-    #[error("A child was expected for {entry_tag}, but it was not there")]
-    ExpectedChildNotPresent { entry_tag: String },
-    #[error("The frame base is not known yet")]
-    UnknownFrameBase,
-    #[error("The dwarf unit for a `pc` of {pc:#X} could not be found")]
-    DwarfUnitNotFound { pc: u64 },
-    #[error("A number could not be converted to another type")]
-    NumberConversionError,
-    #[error("Register {0:?} is required, but is not available in the device memory")]
-    MissingRegister(#[from] MissingRegisterError),
-    #[error("Memory was expected to be available at address {0:#X}, but wasn't")]
-    MissingMemory(u64),
-}
 
 pub(self) const THUMB_BIT: u32 = 1;
 
@@ -185,7 +147,8 @@ impl<'data> UnwindingContext<'data> {
                 function: context_frame
                     .function
                     .map(|f| f.demangle().ok().map(|f| f.into_owned()))
-                    .flatten(),
+                    .flatten()
+                    .unwrap_or_else(|| "UNKNOWN".into()),
                 location: crate::Location { file, line, column },
                 frame_type: FrameType::InlineFunction,
                 variables,
@@ -219,7 +182,7 @@ impl<'data> UnwindingContext<'data> {
         let unwind_info = match unwind_info {
             Ok(unwind_info) => unwind_info.clone(),
             Err(_e) => {
-                return Ok((Some(Frame { function: Some("Unknown".into()), location: crate::Location { file: None, line: None, column: None }, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
+                return Ok((Some(Frame { function: "Unknown".into(), location: crate::Location { file: None, line: None, column: None }, frame_type: FrameType::Corrupted(format!("debug information for address {:#x} is missing. Likely fixes:
                 1. compile the Rust code with `debug = 1` or higher. This is configured in the `profile.{{release,bench}}` sections of Cargo.toml (`profile.{{dev,test}}` default to `debug = 2`)
                 2. use a recent version of the `cortex-m` crates (e.g. cortex-m 0.6.3 or newer). Check versions in Cargo.lock
                 3. if linking to C code, compile the C code with the `-g` flag", self.device_memory.register(gimli::Arm::PC)?)),
@@ -233,7 +196,7 @@ impl<'data> UnwindingContext<'data> {
             Err(e) => {
                 return Ok((
                     Some(Frame {
-                        function: Some("Unknown".into()),
+                        function: "Unknown".into(),
                         location: crate::Location {
                             file: None,
                             line: None,
@@ -259,7 +222,7 @@ impl<'data> UnwindingContext<'data> {
 
             return Ok((
                 Some(Frame {
-                    function: Some("Unknown".into()),
+                    function: "Unknown".into(),
                     location: crate::Location {
                         file: None,
                         line: None,
@@ -286,7 +249,7 @@ impl<'data> UnwindingContext<'data> {
                 _ => {
                     return Ok((
                         Some(Frame {
-                            function: Some("Unknown".into()),
+                            function: "Unknown".into(),
                             location: crate::Location {
                                 file: None,
                                 line: None,
@@ -312,7 +275,7 @@ impl<'data> UnwindingContext<'data> {
                 Err(TraceError::MissingMemory(address)) => {
                     return Ok((
                         Some(Frame {
-                            function: Some("Unknown".into()),
+                            function: "Unknown".into(),
                             location: crate::Location {
                                 file: None,
                                 line: None,
@@ -344,7 +307,7 @@ impl<'data> UnwindingContext<'data> {
             // We'll also make an assumption that there's no frames before reset
             return Ok((
                 Some(Frame {
-                    function: Some("RESET".into()),
+                    function: "RESET".into(),
                     location: crate::Location {
                         file: None,
                         line: None,
@@ -370,7 +333,7 @@ impl<'data> UnwindingContext<'data> {
                 .is_none()
             {
                 Ok((Some(Frame {
-                    function: Some("Unknown".into()),
+                    function: "Unknown".into(),
                     location: crate::Location { file: None, line: None, column: None },
                     frame_type: FrameType::Corrupted(
                         format!("The stack pointer ({:#08X}) is corrupted or the dump does not contain the full stack", self.device_memory
@@ -387,7 +350,7 @@ impl<'data> UnwindingContext<'data> {
     fn apply_unwind_info(
         &mut self,
         unwind_info: UnwindTableRow<EndianSlice<LittleEndian>>,
-    ) -> Result<bool, Box<dyn Error>> {
+    ) -> Result<bool, TraceError> {
         let updated = match unwind_info.cfa() {
             CfaRule::RegisterAndOffset { register, offset } => {
                 let new_cfa = (self.device_memory.register(*register)? as i64 + *offset) as u32;
@@ -408,7 +371,7 @@ impl<'data> UnwindingContext<'data> {
                     let new_value = self
                         .device_memory
                         .read_u32(addr, RunTimeEndian::Little)
-                        .ok_or(format!("Address {:#010X} not within stack space", addr))?;
+                        .ok_or(TraceError::MissingMemory(addr))?;
                     *self.device_memory.register_mut(*reg)? = new_value;
                 }
                 _ => unimplemented!(),
@@ -510,6 +473,15 @@ impl<'data> UnwindingContext<'data> {
     }
 }
 
+/// Create the stacktrace for the cortex m target.
+///
+/// - device_memory: All the captured memory of the device.
+/// It is not necessary to include any data that is present in the elf file because that will automatically be added.
+/// It is required to have a decent chunk of the stack present. If not all of the stack is present,
+/// then the eventually the tracing procedure will find a corrupt frame.
+/// The standard set of registers is also required to be present.
+/// - elf_data: The raw bytes of the elf file.
+/// This must be the exact same elf file as the one the device was running. Even a recompilation of the exact same code can change the debug info.
 pub fn trace(
     device_memory: DeviceMemory<u32>,
     elf_data: &[u8],
@@ -522,9 +494,6 @@ pub fn trace(
 
     // Keep looping until we've got the entire trace
     loop {
-        // #[cfg(test)]
-        // println!("{:02X?}", context.registers);
-
         context.find_current_frames(&mut frames)?;
 
         let (unwind_frame, unwinding_left) = context.try_unwind(frames.last_mut())?;

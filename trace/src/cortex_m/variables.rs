@@ -216,6 +216,8 @@ fn find_type(
 
                 match member_entry.tag() {
                     gimli::constants::DW_TAG_member => {
+                        // TODO: Sometimes this is not a simple number, but a location expression.
+                        // As of writing this has not come up, but I can imagine this is the case for C bitfields.
                         let member_location = member_entry
                             .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
                             .required_udata_value()?;
@@ -244,19 +246,19 @@ fn find_type(
 
             match tag {
                 gimli::constants::DW_TAG_structure_type => Ok(VariableType::Structure {
-                    type_name,
+                    name: type_name,
                     type_params,
                     members,
                     byte_size,
                 }),
                 gimli::constants::DW_TAG_union_type => Ok(VariableType::Union {
-                    type_name,
+                    name: type_name,
                     type_params,
                     members,
                     byte_size,
                 }),
                 gimli::constants::DW_TAG_class_type => Ok(VariableType::Class {
-                    type_name,
+                    name: type_name,
                     type_params,
                     members,
                     byte_size,
@@ -302,7 +304,7 @@ fn find_type(
             // So if only the name is missing, we can recover
 
             Ok(VariableType::PointerType {
-                name: name.unwrap_or_else(|_| format!("&{}", pointee_type.get_first_level_name())),
+                name: name.unwrap_or_else(|_| format!("&{}", pointee_type.type_name())),
                 pointee_type: Box::new(pointee_type),
             })
         }
@@ -528,7 +530,7 @@ fn get_variable_data(
     variable_type: &VariableType,
     variable_location: VariableLocationResult,
 ) -> Result<BitVec<u8, Lsb0>, String> {
-    let variable_size = variable_type.get_variable_size();
+    let variable_size = variable_type.byte_size();
 
     match variable_location {
         VariableLocationResult::NoLocationAttribute => {
@@ -636,7 +638,7 @@ fn read_variable(
         VariableType::ArrayType {
             array_type, count, ..
         } => {
-            let element_byte_size = array_type.get_variable_size() as usize;
+            let element_byte_size = array_type.byte_size() as usize;
             let element_data_chunks = data.chunks(element_byte_size * 8);
 
             let mut values = Vec::new();
@@ -650,7 +652,7 @@ fn read_variable(
         VariableType::PointerType { pointee_type, .. } => {
             // Cortex m, so pointer is little endian u32
             let address = data.load_le::<u32>() as u64;
-            let pointee_size = pointee_type.get_variable_size() as u64;
+            let pointee_size = pointee_type.byte_size() as u64;
             let pointee_memory = device_memory.read_slice(address..(address + pointee_size));
 
             let pointee_value = match pointee_memory {
@@ -662,7 +664,7 @@ fn read_variable(
                 "*{:#010X} (= {} ({}))",
                 address,
                 pointee_value.unwrap_or_else(|e| format!("Error({})", e)),
-                pointee_type.get_first_level_name(),
+                pointee_type.type_name(),
             ))
         }
         VariableType::EnumerationType {
@@ -678,7 +680,7 @@ fn read_variable(
                 } => read_base_type(encoding, byte_size, name, data),
                 t => Err(format!(
                     "Enumeration underlying type is not a BaseType: {}",
-                    t.get_first_level_name()
+                    t.type_name()
                 )),
             }?;
 
@@ -699,13 +701,19 @@ fn read_variable(
             }
         }
         VariableType::Structure {
-            type_name, members, ..
+            name: type_name,
+            members,
+            ..
         }
         | VariableType::Class {
-            type_name, members, ..
+            name: type_name,
+            members,
+            ..
         }
         | VariableType::Union {
-            type_name, members, ..
+            name: type_name,
+            members,
+            ..
         } => {
             let string_render = if type_name == "&str" {
                 // Let's render the string nicely
@@ -761,7 +769,7 @@ fn read_variable(
                     let members_string = members
                         .iter()
                         .map(|member| {
-                            let member_size = member.member_type.get_variable_size() as usize;
+                            let member_size = member.member_type.byte_size() as usize;
                             let member_data =
                                 &data[member.member_location as usize * 8..][..member_size * 8];
                             let member_value =
@@ -879,15 +887,14 @@ pub fn find_variables(
         }
 
         match (variable_name, variable_type) {
-            (Ok(variable_name), Ok(variable_type)) if variable_type.get_variable_size() == 0 => {
-                variables.push(Variable {
+            (Ok(variable_name), Ok(variable_type)) if variable_type.byte_size() == 0 => variables
+                .push(Variable {
                     name: variable_name,
                     kind: variable_kind,
                     value: Ok("{ (ZST) }".into()),
                     variable_type,
-                    file_location: variable_file_location,
-                })
-            }
+                    location: variable_file_location,
+                }),
             (Ok(variable_name), Ok(variable_type)) => {
                 let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
 
@@ -914,7 +921,7 @@ pub fn find_variables(
                     kind: variable_kind,
                     value: variable_value,
                     variable_type,
-                    file_location: variable_file_location,
+                    location: variable_file_location,
                 })
             }
             (Ok(variable_name), Err(type_error)) => {

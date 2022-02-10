@@ -1,9 +1,8 @@
+use crate::error::TraceError;
 use gimli::{
     Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAt, Expression, Reader,
     ReaderOffset, Unit,
 };
-
-use crate::cortex_m::TraceError;
 
 pub trait DebuggingInformationEntryExt<R: Reader> {
     fn required_attr(
