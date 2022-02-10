@@ -101,7 +101,7 @@ impl Display for Frame {
         writeln!(f, "{} ({:?})", self.function, self.frame_type)?;
 
         let location_text = self.location.to_string();
-        if !location_text.is_empty(){
+        if !location_text.is_empty() {
             writeln!(f, "  at {}", location_text)?;
         }
 

@@ -1,3 +1,4 @@
+use super::TraceError;
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     Enumerator, Location, StructureMember, TemplateTypeParam, Variable, VariableKind, VariableType,
@@ -10,8 +11,6 @@ use gimli::{
 };
 use stackdump_core::device_memory::DeviceMemory;
 use std::{ops::Deref, rc::Rc};
-
-use super::TraceError;
 
 type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
@@ -32,8 +31,7 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     unit: &'unit Unit<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, TraceError>
-{
+) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, TraceError> {
     // Find the attribute
     let abstract_origin_attr = entry.attr(gimli::constants::DW_AT_abstract_origin)?;
 

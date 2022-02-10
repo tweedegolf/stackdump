@@ -58,9 +58,9 @@ pub trait MemoryRegion: Debug {
     /// Clears the existing memory data and copies the new data from the given pointer
     ///
     /// If the data_len is greater than the capacity of this memory region, then this function will panic.
-    /// 
+    ///
     /// ## Safety
-    /// 
+    ///
     /// The entire block of memory from `data_ptr .. data_ptr + data_len` must be readable.
     /// (A memcpy must be possible with the pointer as source)
     unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize);
