@@ -146,5 +146,7 @@ fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryR
     }
 
     let stack_size = stack_start().saturating_sub(stack_pointer).min(SIZE as u32);
-    stack.copy_from_memory(stack_pointer as *const u8, stack_size as usize);
+    unsafe {
+        stack.copy_from_memory(stack_pointer as *const u8, stack_size as usize);
+    }
 }

@@ -4,6 +4,7 @@ members = [
     "capture",
     "core",
     "trace",
+    "cli",
 ]
 
 exclude = [

@@ -1,10 +1,10 @@
 //! A module containing functions for finding and reading the variables of frames.
-//! 
+//!
 //! These are (almost) all pure functions that get all of their context through the parameters.
 //! This was decided because the datastructures that are involved are pretty complex and I didn't
 //! want to add complexity.
 //! All functions can be reasoned with on the function level.
-//! 
+//!
 
 use super::TraceError;
 use crate::{
@@ -446,13 +446,18 @@ fn evaluate_location(
 
     let mut result = location_evaluation.evaluate()?;
     while result != EvaluationResult::Complete {
+        log::trace!("Location evaluation result: {:?}", result);
         match result {
             EvaluationResult::RequiresRegister {
                 register,
-                base_type: _,
+                base_type,
             } => {
                 let value = device_memory.register(register)?;
-                result = location_evaluation.resume_with_register(gimli::Value::U32(value))?;
+                let value = match dbg!(base_type.0) {
+                    0 => gimli::Value::Generic(value.into()),
+                    _ => todo!("Other types than generic haven't been implemented yet"),
+                };
+                result = location_evaluation.resume_with_register(value)?;
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
                 result = location_evaluation.resume_with_frame_base(
@@ -575,6 +580,12 @@ fn read_variable(
     data: &BitSlice<u8, Lsb0>,
     device_memory: &DeviceMemory<u32>,
 ) -> Result<String, String> {
+    if ((data.len() / 8) as u64) < variable_type.byte_size() {
+        log::warn!("Variable of type {} has size of {}, but only {} bytes are available", variable_type.type_name(), variable_type.byte_size(), data.len() / 8);
+    }
+
+    let data = &data[..(variable_type.byte_size() as usize * 8).min(data.len())];
+
     fn read_base_type(
         encoding: &gimli::DwAte,
         byte_size: &u64,
@@ -767,14 +778,22 @@ fn read_variable(
             match string_render {
                 Some(string_render) => string_render,
                 None => {
+                    log::debug!("Creating struct render for {} with {} bytes of data", type_name, data.len() / 8);
                     let members_string = members
                         .iter()
                         .map(|member| {
+                            log::debug!("Creating struct render for structure member: {}", member.name);
+
                             let member_size = member.member_type.byte_size() as usize;
+                            log::trace!("Getting the data for structure member from location {} bytes with a length of {} bytes", member.member_location, member_size);
                             let member_data =
-                                &data[member.member_location as usize * 8..][..member_size * 8];
-                            let member_value =
-                                read_variable(&member.member_type, member_data, device_memory);
+                                data.get(member.member_location as usize * 8..).and_then(|data| data.get(..member_size * 8));
+
+                            let member_value = match member_data {
+                                None => Err("Data not available".into()),
+                                Some(member_data) => read_variable(&member.member_type, member_data, device_memory),
+                            };
+                                
                             format!(
                                 "{}: {}",
                                 member.name,
@@ -895,6 +914,10 @@ pub fn find_variables(
                     location: variable_file_location,
                 }),
             (Ok(variable_name), Ok(variable_type)) => {
+                if entry.offset().0 == 0x5AF {
+                    log::info!("TRIGGER");
+                }
+
                 let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
 
                 let location_attr = match (location_attr, abstract_origin_entry) {

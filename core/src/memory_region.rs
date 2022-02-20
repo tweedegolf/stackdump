@@ -5,6 +5,8 @@ use core::fmt::Debug;
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 
+pub const MEMORY_REGION_IDENTIFIER: u8 = 0x01;
+
 /// A collection of bytes that capture a memory region
 pub trait MemoryRegion: Debug {
     /// The address range of the region where the start is the first address that the region captures
@@ -119,6 +121,8 @@ impl<const SIZE: usize> FromIterator<u8> for ArrayMemoryRegion<SIZE> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
+        assert_eq!(iter.next().unwrap(), MEMORY_REGION_IDENTIFIER, "The given iterator is not for a memory region");
+
         let start_address = u64::from_le_bytes([
             iter.next().unwrap(),
             iter.next().unwrap(),
@@ -206,6 +210,8 @@ impl FromIterator<u8> for VecMemoryRegion {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
+        assert_eq!(iter.next().unwrap(), MEMORY_REGION_IDENTIFIER, "The given iterator is not for a memory region");
+
         let start_address = u64::from_le_bytes([
             iter.next().unwrap(),
             iter.next().unwrap(),
@@ -259,17 +265,21 @@ impl<'a> Iterator for MemoryRegionIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.index {
-            index @ 0..=7 => {
+            0 => {
                 self.index += 1;
-                Some(self.start_address.to_le_bytes()[index])
+                Some(MEMORY_REGION_IDENTIFIER)
             }
-            index @ 8..=15 => {
+            index @ 1..=8 => {
                 self.index += 1;
-                Some((self.data.len() as u64).to_le_bytes()[index - 8])
+                Some(self.start_address.to_le_bytes()[index - 1])
+            }
+            index @ 9..=16 => {
+                self.index += 1;
+                Some((self.data.len() as u64).to_le_bytes()[index - 9])
             }
             index => {
                 self.index += 1;
-                self.data.get(index - 16).copied()
+                self.data.get(index - 17).copied()
             }
         }
     }

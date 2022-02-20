@@ -4,6 +4,8 @@ use arrayvec::ArrayVec;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub const REGISTER_DATA_IDENTIFIER: u8 = 0x02;
+
 /// A trait for reading registers from a register collection
 ///
 /// This
@@ -107,6 +109,8 @@ impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterD
         // Get the iterator. We assume that it is in the same format as the bytes function outputs
         let mut iter = iter.into_iter();
 
+        assert_eq!(iter.next().unwrap(), REGISTER_DATA_IDENTIFIER, "The given iterator is not for register data");
+
         // First the starting number is encoded
         let starting_register_number =
             u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
@@ -202,6 +206,8 @@ impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
+        assert_eq!(iter.next().unwrap(), REGISTER_DATA_IDENTIFIER, "The given iterator is not for register data");
+
         let starting_register_number =
             u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);
 
@@ -242,18 +248,22 @@ impl<'a, RB: RegisterBacking> Iterator for RegisterDataBytesIterator<'a, RB> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.index {
-            index @ 0..=1 => {
+            0 => {
                 self.index += 1;
-                Some(self.starting_register_number.to_le_bytes()[index])
+                Some(REGISTER_DATA_IDENTIFIER)
             }
-            index @ 2..=3 => {
+            index @ 1..=2 => {
                 self.index += 1;
-                Some((self.registers.len() as u16).to_le_bytes()[index - 2])
+                Some(self.starting_register_number.to_le_bytes()[index - 1])
+            }
+            index @ 3..=4 => {
+                self.index += 1;
+                Some((self.registers.len() as u16).to_le_bytes()[index - 3])
             }
             index => {
                 self.index += 1;
 
-                let index = index - 4;
+                let index = index - 5;
                 let register_size = core::mem::size_of::<RB>();
                 let register_index = index / register_size;
                 let byte_index = index % register_size;
