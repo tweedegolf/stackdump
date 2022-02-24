@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-capture"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.59"
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ categories = ["embedded", "no-std"]
 description = "Crate for capturing stack dumps"
 
 [dependencies]
-stackdump-core = { version = "0.1.0", path = "../core", default-features = false }
+stackdump-core = { version = "0.1.1", path = "../core", default-features = false }
 arrayvec = { version = "0.7.2", default-features = false }
 bare-metal = "0.2.5" # Using the old version because cortex-m still uses this
 

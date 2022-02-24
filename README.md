@@ -14,7 +14,7 @@ Currently only Cortex M is supported, but PR's are welcome!
 
 There are likely many bugs in the tracing of variables. If you notice anything, please make a PR.
 It would help if you can include the output of `readelf <your_elf_file> --debug-dump` in the issue (as a gist link).
-For me to be fully reproduce the tracing I will also need your elf file.
+For me to be fully able to reproduce the tracing, I will also need your elf file.
 
 Both the debug dump and elf file can be sensitive for IP reasons. So if you can't include it in the issue, I can understand.
 
