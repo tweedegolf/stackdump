@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .add_memory_region(VecMemoryRegion::from_iter(&mut dump_iter)),
                         REGISTER_DATA_IDENTIFIER => device_memory
                             .add_register_data(VecRegisterData::from_iter(&mut dump_iter)),
-                        _ => Err(format!("Dump data error. Got to an unexpected identifier"))?,
+                        _ => return Err("Dump data error. Got to an unexpected identifier".into()),
                     }
                 }
             }

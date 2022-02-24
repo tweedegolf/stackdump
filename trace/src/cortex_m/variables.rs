@@ -22,6 +22,7 @@ use std::{ops::Deref, rc::Rc};
 
 type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
+/// Gets the string value from the `DW_AT_name` attribute of the given entry
 fn get_entry_name(
     context: &Context<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
