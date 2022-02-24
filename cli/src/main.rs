@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use clap::{Parser, Subcommand};
 use stackdump_trace::stackdump_core::{
     device_memory::DeviceMemory,

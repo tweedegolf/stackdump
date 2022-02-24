@@ -3,11 +3,12 @@
 A set of crates for capturing and tracing stack dumps.
 See the docs of the respective operations.
 
-| crate   | crates.io                                                                                                         | docs                                                                                               |
-| ------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Core    | [![crates.io](https://img.shields.io/crates/v/stackdump-core.svg)](https://crates.io/crates/stackdump-core)       | [![Documentation](https://docs.rs/stackdump-core/badge.svg)](https://docs.rs/stackdump-core)       |
-| Capture | [![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture) | [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture) |
-| Trace   | [![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace)     | [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)     |
+| crate   | crates.io                                                                                                         | docs                                                                                               | Readme's                  |
+| ------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------- |
+| Core    | [![crates.io](https://img.shields.io/crates/v/stackdump-core.svg)](https://crates.io/crates/stackdump-core)       | [![Documentation](https://docs.rs/stackdump-core/badge.svg)](https://docs.rs/stackdump-core)       | [link](core/README.md)    |
+| Capture | [![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture) | [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture) | [link](capture/README.md) |
+| Trace   | [![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace)     | [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)     | [link](trace/README.md)   |
+| Cli     | [![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli)         | [![Documentation](https://docs.rs/stackdump-cli/badge.svg)](https://docs.rs/stackdump-cli)         | [link](cli/README.md)     |
 
 Currently only Cortex M is supported, but PR's are welcome!
 
@@ -20,81 +21,56 @@ Both the debug dump and elf file can be sensitive for IP reasons. So if you can'
 The output of the trace can look like this (with some spammy variables left out):
 
 ```text
-0: stackdump_capture::cortex_m::capture_core_registers (Function)
-  at C:\Repos\TG\stackdump\capture\src\cortex_m.rs:29:9
+0: stackdump_capture::cortex_m::capture_core_registers (InlineFunction)
+  at C:\Repos\TG\stackdump\capture\src\cortex_m.rs:54:9
 
-1: stackdump_capture::cortex_m::capture (Function)
-  at C:\Repos\TG\stackdump\capture\src\cortex_m.rs:8:5
+1: stackdump_capture::cortex_m::capture (InlineFunction)
+  at C:\Repos\TG\stackdump\capture\src\cortex_m.rs:33:26
 
-2: stackdump_capture::cortex_m::capture_with_fpu (Function)
-  at C:\Repos\TG\stackdump\capture\src\cortex_m.rs:18:6
+2: nrf52840::__cortex_m_rt_TIMER0::{{closure}} (InlineFunction)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:108:51
 
-3: nrf52840::__cortex_m_rt_TIMER0::{{closure}} (Function)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:107:51
-  variables:
-    param: { (ZST) } ({closure#1})
-    cs: *0x2003FBEC (= CriticalSection { _0: () } (CriticalSection)) (&CriticalSection)
-
-4: cortex_m::interrupt::free (Function)
+3: cortex_m::interrupt::free (Function)
   at C:\Users\diond\.cargo\registry\src\github.com-1ecc6299db9ec823\cortex-m-0.7.4\src\interrupt.rs:64:13
   variables:
-    f: { (ZST) } ({closure#1})
-    primask: Primask::Active (Primask)
-    r: { (ZST) } (())
+    primask: Error(Optimized away (No location attribute)) (Primask) at C:\Users\diond\.cargo\registry\src\github.com-1ecc6299db9ec823\cortex-m-0.7.4\src\interrupt.rs:59
 
-5: nrf52840::__cortex_m_rt_TIMER0 (Function)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:105:9
+4: nrf52840::__cortex_m_rt_TIMER0 (InlineFunction)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:125:5
+
+5: TIMER0 (Exception)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:98:1
+
+6: <u64 as core::ops::bit::BitOrAssign>::bitor_assign (InlineFunction)
+  at /rustc/532d3cda90b8a729cd982548649d32803d265052/library/core/src/ops/bit.rs:799:53
+
+7: compiler_builtins::float::add::add (InlineFunction)
+  at /cargo/registry/src/github.com-1ecc6299db9ec823/compiler_builtins-0.1.70/src/float/add.rs:177:5
+
+8: compiler_builtins::float::add::__adddf3 (Function)
+  at /cargo/registry/src/github.com-1ecc6299db9ec823/compiler_builtins-0.1.70/src/float/add.rs:201:9
+
+9: nrf52840::do_loop (Function)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:83:9
   variables:
-    timer: *0x40008000 (= Error(Not within available memory) (RegisterBlock)) (&RegisterBlock)
+    (parameter) increment: Error(Optimized away (No location attribute)) (&u32) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:71
+    (parameter) double_trouble: true (bool) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:71
+    (parameter) message: *0x0000C707:10 (= "I like you") (&str) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:71
+    num: 310368 (u32) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:72
+    nums: [77588, 0, 77592, 0] ([u32;4]) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:73
+    fnum: Error(Location list not found for the current PC value (A variable lower on the stack may contain the value)) (f64) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:74
 
-6: TIMER0 (Exception)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:97:1
-
-7: compiler_builtins::float::add::__adddf3 (Function)
-  at /cargo/registry/src/github.com-1ecc6299db9ec823/compiler_builtins-0.1.66/src/macros.rs:228:10
-
-8: nrf52840::do_loop (Function)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:82:9
+10: nrf52840::__cortex_m_rt_main (Function)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs
   variables:
-    increment: *0x2003FF2C (= 2 (u32)) (&u32)
-    double_trouble: true (bool)
-    message: *0x0000EA9A:10 (= "I hate you") (&str)
-    num: 79684 (u32)
-    nums: [19920, 0, 19922, 0] ([u32;4])
-    fnum: 199.1999999999638 (f64)
-    _args: (&&u32, &u32) { __0: *0x2003FD8C (= *0x2003FD48 (= 79684 (u32)) (&u32)), __1: *0x2003FD48 (= 79684 (u32)) } ((&&u32, &u32))
-    channels: Channels { up: (rtt_target::UpChannel, rtt_target::UpChannel) { __0: UpChannel { __0: *0x20000020 (= Error(Not within available memory) (RttChannel)) }, __1: UpChannel { __0: *0x20000038 (= Error(Not within available memory) (RttChannel)) } } } (Channels)
-    rng: { (ZST) } (Rng)
-    random_index: 1 (u32)
-    message: *0x0000EA9A:10 (= "I hate you") (&str)
-    increment: 2 (u32)
-    _args: (&&u32, &u32) { __0: *0x2003FF60 (= *0x2003FF2C (= 2 (u32)) (&u32)), __1: *0x2003FF2C (= 2 (u32)) } ((&&u32, &u32))
-    timer: { (ZST) } (Timer<nrf52840_pac::TIMER0, nrf_hal_common::timer::Periodic>)
-    res: 1.4661482823948837e-84 (f64)
-    _args: (&f64) { __0: *0xF36598AF (= Error(Not within available memory) (f64)) } ((&f64))
+    channels: Error(Location list not found for the current PC value (A variable lower on the stack may contain the value)) (Channels) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:29
+    random_index: Error(Location list not found for the current PC value (A variable lower on the stack may contain the value)) (u32) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:50
+    message: *0x0000C707:10 (= "I like you") (&str) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:51
+    increment: 4 (u32) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:52
+    res: 4.24397352e-315 (f64) at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:63
 
-9: nrf52840::__cortex_m_rt_main (Function)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:62:15
-  variables:
-    _cp: { (ZST) } (Peripherals)
-    dp: { (ZST) } (Peripherals)
-    cb: *0x20000008 (= Error(Not within available memory) (RttControlBlock)) (&mut RttControlBlock)
-    name: *0x0000EA6C (= 84 (u8)) (*const u8)
-    mode: ChannelMode::BlockIfFull (ChannelMode)
-    name: *0x0000EA75 (= 68 (u8)) (*const u8)
-    mode: ChannelMode::BlockIfFull (ChannelMode)
-    channels: Channels { up: (rtt_target::UpChannel, rtt_target::UpChannel) { __0: UpChannel { __0: *0x20000020 (= Error(Not within available memory) (RttChannel)) }, __1: UpChannel { __0: *0x20000038 (= Error(Not within available memory) (RttChannel)) } } } (Channels)
-    rng: { (ZST) } (Rng)
-    random_index: 1 (u32)
-    message: *0x0000EA9A:10 (= "I hate you") (&str)
-    increment: 2 (u32)
-    _args: (&&u32, &u32) { __0: *0x2003FF60 (= *0x2003FF2C (= 2 (u32)) (&u32)), __1: *0x2003FF2C (= 2 (u32)) } ((&&u32, &u32))
-    timer: { (ZST) } (Timer<nrf52840_pac::TIMER0, nrf_hal_common::timer::Periodic>)
-    res: 1.4661482823948837e-84 (f64)
-    _args: (&f64) { __0: *0xF36598AF (= Error(Not within available memory) (f64)) } ((&f64))
+11: main (Function)
+  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:24:1
 
-10: main (Function)
-  at C:\Repos\TG\stackdump\examples\nrf52840\src\main.rs:23:1
-
-11: RESET (Function)
+12: RESET (Function)
 ```
