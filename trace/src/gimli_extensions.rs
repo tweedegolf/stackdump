@@ -1,7 +1,7 @@
 use crate::error::TraceError;
 use gimli::{
-    Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAt, Expression, Reader,
-    ReaderOffset, Unit,
+    Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAddr, DwAt, Expression,
+    Reader, ReaderOffset, Unit,
 };
 
 pub trait DebuggingInformationEntryExt<R: Reader> {
@@ -71,6 +71,7 @@ pub trait AttributeExt<R: Reader> {
         debug_str: &DebugStr<R>,
         debug_str_sup: Option<&DebugStr<R>>,
     ) -> Result<R, TraceError>;
+    fn required_address_class(&self) -> Result<DwAddr, TraceError>;
 }
 
 impl<R: Reader> AttributeExt<R> for Attribute<R> {
@@ -140,6 +141,16 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
                 attribute_name: self.name().to_string(),
                 value_type_name: get_attribute_value_type_name(&self.value()),
             })
+    }
+
+    fn required_address_class(&self) -> Result<DwAddr, TraceError> {
+        match self.value() {
+            AttributeValue::AddressClass(class) => Ok(class),
+            _ => Err(TraceError::WrongAttributeValueType {
+                attribute_name: self.name().to_string(),
+                value_type_name: get_attribute_value_type_name(&self.value()),
+            }),
+        }
     }
 }
 

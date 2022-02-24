@@ -40,4 +40,17 @@ pub enum TraceError {
     MissingRegister(#[from] MissingRegisterError),
     #[error("Memory was expected to be available at address {0:#X}, but wasn't")]
     MissingMemory(u64),
+    #[error("{member_name} of {object_name} has unexpected tag {member_tag}")]
+    UnexpectedMemberTag {
+        object_name: String,
+        member_name: String,
+        member_tag: gimli::DwTag,
+    },
+    #[error(
+        "A pointer with the name {pointer_name} has an unexpected class value of {class_value}"
+    )]
+    UnexpectedPointerClass {
+        pointer_name: String,
+        class_value: gimli::DwAddr,
+    },
 }

@@ -36,6 +36,7 @@ fn get_entry_name(
     Ok(attr_string.to_string()?.into())
 }
 
+/// If available, get the EntriesTree of the `DW_AT_abstract_origin` attribute of the given entry
 fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     unit: &'unit Unit<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
@@ -65,6 +66,7 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     ))
 }
 
+/// Get the EntriesTree of the `DW_AT_type` attribute of the given entry
 fn get_entry_type_reference_tree<'abbrev, 'unit>(
     unit: &'unit Unit<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
@@ -87,11 +89,16 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
     Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
 }
 
+/// Finds the [Location] of the given entry.
+///
+/// This is done based on the `DW_AT_decl_file`, `DW_AT_decl_line` and `DW_AT_decl_column` attributes.
+/// These are normally present on variables and functions.
 fn find_entry_location<'unit>(
     context: &Context<DefaultReader>,
     unit: &'unit Unit<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<Location, TraceError> {
+    // Get the attributes
     let variable_decl_file = entry
         .attr_value(gimli::constants::DW_AT_decl_file)?
         .and_then(|f| match f {
@@ -132,9 +139,11 @@ fn find_entry_location<'unit>(
         }
     }
 
+    // The file is given as a number, so we need to search for the real file path
     let variable_file = if let (Some(variable_decl_file), Some(line_program)) =
         (variable_decl_file, unit.line_program.as_ref())
     {
+        // The file paths are stored in the line_program
         if let Some(file_entry) = line_program.header().file(variable_decl_file) {
             let mut path = if let Some(comp_dir) = &unit.comp_dir {
                 comp_dir.to_string_lossy()?.into_owned()
@@ -178,20 +187,33 @@ fn find_entry_location<'unit>(
     })
 }
 
+/// Decodes the type of an entry.
+///
+/// The given node should come from the [get_entry_type_reference_tree]
+/// and [get_entry_abstract_origin_reference_tree] functions.
 fn find_type(
     context: &Context<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
 ) -> Result<VariableType, TraceError> {
+    // Get the root entry and its tag
     let entry = node.entry();
     let entry_tag = entry.tag().to_string();
 
+    // The tag tells us what the base type it
     match entry.tag() {
         tag if tag == gimli::constants::DW_TAG_structure_type
             || tag == gimli::constants::DW_TAG_union_type
             || tag == gimli::constants::DW_TAG_class_type =>
         {
+            // We have an object with members
+            // The informations we can gather is:
+            // - type name
+            // - type parameters
+            // - the members of the object
+            // - the byte size of the object
+
             let type_name = get_entry_name(context, unit, entry)?;
             let mut members = Vec::new();
             let mut type_params = Vec::new();
@@ -199,9 +221,20 @@ fn find_type(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
+            // The members of the object can be found by looking at the children of the node
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
                 let member_entry = child.entry();
+
+                // Object children can be a couple of things:
+                // - Member fields
+                // - Type parameters
+                // - Sub programs (methods)
+                // - Other objects (TODO what does this mean?)
+
+                // Member fields have a name, a type and a location offset (relative to the base of the object).
+                // Type parameters only have a name and a type.
+                // The rest of the children are ignored.
 
                 let member_name = match get_entry_name(context, unit, member_entry) {
                     Ok(member_name) => member_name,
@@ -239,12 +272,16 @@ fn find_type(
                         })
                     }
                     gimli::constants::DW_TAG_subprogram => {} // Ignore
-                    gimli::constants::DW_TAG_structure_type => {} // Ignore
-                    _ => unimplemented!(
-                        "Unexpected tag {:?} for {}",
-                        member_entry.tag().static_string(),
-                        type_name,
-                    ),
+                    gimli::constants::DW_TAG_structure_type
+                    | gimli::constants::DW_TAG_union_type
+                    | gimli::constants::DW_TAG_class_type => {} // Ignore
+                    member_tag => {
+                        return Err(TraceError::UnexpectedMemberTag {
+                            object_name: type_name,
+                            member_name,
+                            member_tag,
+                        })
+                    }
                 }
             }
 
@@ -271,6 +308,12 @@ fn find_type(
             }
         }
         gimli::constants::DW_TAG_base_type => {
+            // A base type is a primitive and there are many of them.
+            // Which base type this is, is recorded in the `DW_AT_encoding` attribute.
+            // The value of that attribute is a `DwAte`.
+
+            // We record the name, the encoding and the size of the primitive
+
             let name = get_entry_name(context, unit, entry)?;
             let encoding = entry
                 .required_attr(unit, gimli::constants::DW_AT_encoding)
@@ -295,7 +338,9 @@ fn find_type(
             })
         }
         gimli::constants::DW_TAG_pointer_type => {
-            let name = get_entry_name(context, unit, entry);
+            // A pointer in this context is just a number.
+            // It has a name and a type that indicates the type of the object it points to.
+
             let pointee_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
                 |mut type_tree| {
                     type_tree
@@ -307,12 +352,34 @@ fn find_type(
             // Some pointers don't have names, but generally it is just `&<typename>`
             // So if only the name is missing, we can recover
 
+            let name = get_entry_name(context, unit, entry)
+                .unwrap_or_else(|_| format!("&{}", pointee_type.type_name()));
+
+            // The debug info also contains an address class that can describe what kind of pointer it is.
+            // We only support `DW_ADDR_none` for now, which means that there's no special specification.
+            // We do perform the check though to be sure.
+
+            let address_class = entry
+                .required_attr(unit, gimli::constants::DW_AT_address_class)?
+                .required_address_class()?;
+            if address_class != gimli::constants::DW_ADDR_none {
+                return Err(TraceError::UnexpectedPointerClass {
+                    pointer_name: name,
+                    class_value: address_class,
+                });
+            }
+
             Ok(VariableType::PointerType {
-                name: name.unwrap_or_else(|_| format!("&{}", pointee_type.type_name())),
+                name,
                 pointee_type: Box::new(pointee_type),
             })
         }
         gimli::constants::DW_TAG_array_type => {
+            // Arrays are their own thing in DWARF.
+            // They have no name.
+            // What can be found on the entry are the type of the elements of the array and the byte size.
+            // Arrays have one child entry that contains information about the indexing of the array.
+
             let array_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
                 |mut type_tree| {
                     type_tree
@@ -361,6 +428,10 @@ fn find_type(
             })
         }
         gimli::constants::DW_TAG_enumeration_type => {
+            // This is an enum type (like a C-style enum).
+            // Enums have a name and also an underlying_type (which is usually an integer).
+            // The entry also has a child `DW_TAG_enumerator` for each variant.
+
             let name = get_entry_name(context, unit, entry)?;
             let underlying_type = get_entry_type_reference_tree(unit, abbreviations, entry)
                 .map(|mut type_tree| {
@@ -379,6 +450,10 @@ fn find_type(
                 if enumerator_entry.tag() == gimli::constants::DW_TAG_subprogram {
                     continue;
                 }
+
+                // Each variant has a name and an integer value.
+                // If the enum has that value, then the enum is of that variant.
+                // This does of course not work for flag enums.
 
                 let enumerator_name = get_entry_name(context, unit, enumerator_entry)?;
                 let const_value = enumerator_entry
