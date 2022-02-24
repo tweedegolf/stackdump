@@ -1,5 +1,7 @@
 # Stackdump Trace
 
+[![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace) [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)
+
 This crate implement stack tracing from the memory that was captured using the stackdump-capture crate.
 
 Also see the [main repo readme](../README.md).

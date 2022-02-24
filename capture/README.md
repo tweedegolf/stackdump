@@ -1,5 +1,8 @@
 # Stackdump Capture
 
+[![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture) [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture)
+
+
 This crate defines stackdump capture functions for the platforms it is compiled for.
 
 Also see the [main repo readme](../README.md).

@@ -1,5 +1,7 @@
 # Stackdump-cli
 
+[![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli) [![Documentation](https://docs.rs/stackdump-cli/badge.svg)](https://docs.rs/stackdump-cli)
+
 Command line program for tracing dumps.
 
 Also see the [main repo readme](../README.md).
