@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+/// The identifier that is being used in the byte iterator to be able to differentiate between register data and memory regions
 pub const REGISTER_DATA_IDENTIFIER: u8 = 0x02;
 
 /// A trait for reading registers from a register collection
@@ -109,7 +110,11 @@ impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterD
         // Get the iterator. We assume that it is in the same format as the bytes function outputs
         let mut iter = iter.into_iter();
 
-        assert_eq!(iter.next().unwrap(), REGISTER_DATA_IDENTIFIER, "The given iterator is not for register data");
+        assert_eq!(
+            iter.next().unwrap(),
+            REGISTER_DATA_IDENTIFIER,
+            "The given iterator is not for register data"
+        );
 
         // First the starting number is encoded
         let starting_register_number =
@@ -206,7 +211,11 @@ impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
-        assert_eq!(iter.next().unwrap(), REGISTER_DATA_IDENTIFIER, "The given iterator is not for register data");
+        assert_eq!(
+            iter.next().unwrap(),
+            REGISTER_DATA_IDENTIFIER,
+            "The given iterator is not for register data"
+        );
 
         let starting_register_number =
             u16::from_le_bytes([iter.next().unwrap(), iter.next().unwrap()]);

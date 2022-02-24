@@ -453,7 +453,7 @@ fn evaluate_location(
                 base_type,
             } => {
                 let value = device_memory.register(register)?;
-                let value = match dbg!(base_type.0) {
+                let value = match base_type.0 {
                     0 => gimli::Value::Generic(value.into()),
                     _ => todo!("Other types than generic haven't been implemented yet"),
                 };
@@ -581,7 +581,12 @@ fn read_variable(
     device_memory: &DeviceMemory<u32>,
 ) -> Result<String, String> {
     if ((data.len() / 8) as u64) < variable_type.byte_size() {
-        log::warn!("Variable of type {} has size of {}, but only {} bytes are available", variable_type.type_name(), variable_type.byte_size(), data.len() / 8);
+        log::warn!(
+            "Variable of type {} has size of {}, but only {} bytes are available",
+            variable_type.type_name(),
+            variable_type.byte_size(),
+            data.len() / 8
+        );
     }
 
     let data = &data[..(variable_type.byte_size() as usize * 8).min(data.len())];
@@ -778,7 +783,11 @@ fn read_variable(
             match string_render {
                 Some(string_render) => string_render,
                 None => {
-                    log::debug!("Creating struct render for {} with {} bytes of data", type_name, data.len() / 8);
+                    log::debug!(
+                        "Creating struct render for {} with {} bytes of data",
+                        type_name,
+                        data.len() / 8
+                    );
                     let members_string = members
                         .iter()
                         .map(|member| {
@@ -793,7 +802,7 @@ fn read_variable(
                                 None => Err("Data not available".into()),
                                 Some(member_data) => read_variable(&member.member_type, member_data, device_memory),
                             };
-                                
+
                             format!(
                                 "{}: {}",
                                 member.name,
@@ -888,13 +897,14 @@ pub fn find_variables(
             (variable_type, _) => variable_type,
         };
 
-        let mut variable_kind = VariableKind::Normal;
-        if entry.tag() == gimli::constants::DW_TAG_formal_parameter {
-            variable_kind = variable_kind.and(VariableKind::Parameter);
-        }
-        if abstract_origin_entry.is_some() {
-            variable_kind = variable_kind.and(VariableKind::Inlined);
-        }
+        let variable_kind = VariableKind {
+            zero_sized: variable_type
+                .as_ref()
+                .map(|vt| vt.byte_size() == 0)
+                .unwrap_or_default(),
+            inlined: abstract_origin_entry.is_some(),
+            parameter: entry.tag() == gimli::constants::DW_TAG_formal_parameter,
+        };
 
         // Get the location of the variable
         let mut variable_file_location = find_entry_location(context, unit, entry)?;
@@ -914,10 +924,6 @@ pub fn find_variables(
                     location: variable_file_location,
                 }),
             (Ok(variable_name), Ok(variable_type)) => {
-                if entry.offset().0 == 0x5AF {
-                    log::info!("TRIGGER");
-                }
-
                 let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
 
                 let location_attr = match (location_attr, abstract_origin_entry) {

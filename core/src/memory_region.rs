@@ -5,6 +5,7 @@ use core::fmt::Debug;
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 
+/// The identifier that is being used in the byte iterator to be able to differentiate between memory regions and register data
 pub const MEMORY_REGION_IDENTIFIER: u8 = 0x01;
 
 /// A collection of bytes that capture a memory region
@@ -121,7 +122,11 @@ impl<const SIZE: usize> FromIterator<u8> for ArrayMemoryRegion<SIZE> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
-        assert_eq!(iter.next().unwrap(), MEMORY_REGION_IDENTIFIER, "The given iterator is not for a memory region");
+        assert_eq!(
+            iter.next().unwrap(),
+            MEMORY_REGION_IDENTIFIER,
+            "The given iterator is not for a memory region"
+        );
 
         let start_address = u64::from_le_bytes([
             iter.next().unwrap(),
@@ -210,7 +215,11 @@ impl FromIterator<u8> for VecMemoryRegion {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
-        assert_eq!(iter.next().unwrap(), MEMORY_REGION_IDENTIFIER, "The given iterator is not for a memory region");
+        assert_eq!(
+            iter.next().unwrap(),
+            MEMORY_REGION_IDENTIFIER,
+            "The given iterator is not for a memory region"
+        );
 
         let start_address = u64::from_le_bytes([
             iter.next().unwrap(),

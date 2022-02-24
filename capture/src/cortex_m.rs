@@ -8,7 +8,6 @@ use stackdump_core::{
 
 /// Capture the core registers and the stack
 #[cfg(not(has_fpu))]
-#[inline(never)]
 pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
     _cs: &bare_metal::CriticalSection,
@@ -25,7 +24,6 @@ pub fn capture<const SIZE: usize>(
 
 /// Capture the core & fpu registers and the stack
 #[cfg(has_fpu)]
-#[inline(never)]
 pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
     _cs: &bare_metal::CriticalSection,
@@ -133,7 +131,6 @@ fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
 ///
 /// If the memory region is too small, it will contain the top stack space and miss the bottom stack space.
 /// This is done because the top of the stack is often more interesting than the bottom.
-#[inline(never)]
 fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryRegion<SIZE>) {
     extern "C" {
         static mut _stack_start: core::ffi::c_void;

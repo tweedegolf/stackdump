@@ -9,12 +9,20 @@ use std::{error::Error, path::PathBuf};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Arguments {
-    #[clap(subcommand)]
+    #[clap(
+        subcommand,
+        help = "The platform from which the stackdump was captured"
+    )]
     platform: Platform,
+    #[clap(short = 'i', long, help = "Print all traced inlined variables")]
+    show_inlined_variables: bool,
+    #[clap(short = 'z', long, help = "Print all traced zero-sized variables")]
+    show_zero_sized_variables: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Platform {
+    #[clap(about = "Trace using Cortex-M as the target")]
     CortexM {
         #[clap(help = "Path to the elf file with debug info")]
         elf_file: PathBuf,
@@ -28,6 +36,7 @@ enum Platform {
 
 fn main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Off)
         .env()
         .with_colors(true)
         .init()
@@ -37,10 +46,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match args.platform {
         Platform::CortexM { elf_file, dumps } => {
+            // Read the elf file
             let elf_data = std::fs::read(elf_file)?;
 
+            // Read the saved device memory
             let mut device_memory = DeviceMemory::new();
-
             for dump_path in dumps {
                 let dump_data = std::fs::read(dump_path)?;
 
@@ -57,10 +67,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
+            // Trace the stackdump
             let frames = stackdump_trace::cortex_m::trace(device_memory, &elf_data)?;
 
+            // Display the frames
             for (i, frame) in frames.iter().enumerate() {
-                println!("{}: {}", i, frame);
+                println!(
+                    "{}: {}",
+                    i,
+                    frame.display(
+                        true,
+                        args.show_inlined_variables,
+                        args.show_inlined_variables
+                    )
+                );
             }
         }
     }

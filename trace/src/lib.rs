@@ -96,22 +96,48 @@ pub struct Frame {
     pub variables: Vec<Variable>,
 }
 
-impl Display for Frame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{} ({:?})", self.function, self.frame_type)?;
+impl Frame {
+    /// Get a string that can be displayed to a user
+    ///
+    /// - `show_parameters`: When true, any variable that is a parameter will be shown
+    /// - `show_inlined_vars`: When true, any variable that is inlined will be shown
+    /// - `show_zero_sized_vars`: When true, any variable that is zero-sized will be shown
+    pub fn display(
+        &self,
+        show_parameters: bool,
+        show_inlined_vars: bool,
+        show_zero_sized_vars: bool,
+    ) -> String {
+        use std::fmt::Write;
+
+        let mut display = String::new();
+
+        writeln!(display, "{} ({:?})", self.function, self.frame_type).unwrap();
 
         let location_text = self.location.to_string();
         if !location_text.is_empty() {
-            writeln!(f, "  at {}", location_text)?;
+            writeln!(display, "  at {}", location_text).unwrap();
         }
 
-        if !self.variables.is_empty() {
-            writeln!(f, "  variables:")?;
-            for variable in &self.variables {
-                write!(f, "    {}", variable)?;
+        let filtered_variables = self.variables.iter().filter(|v| {
+            (show_inlined_vars || !v.kind.inlined)
+                && (show_zero_sized_vars || !v.kind.zero_sized)
+                && (show_parameters || !v.kind.parameter)
+        });
+        if filtered_variables.clone().count() > 0 {
+            writeln!(display, "  variables:").unwrap();
+            for variable in filtered_variables {
+                write!(display, "    {}", variable).unwrap();
             }
         }
-        Ok(())
+
+        display
+    }
+}
+
+impl Display for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display(true, false, false))
     }
 }
 
@@ -172,40 +198,31 @@ impl Display for Variable {
 }
 
 /// Type representing what kind of variable something is
-#[derive(Debug, Clone, Copy)]
-pub enum VariableKind {
-    /// A normal variable
-    Normal,
-    /// A parameter of a function
-    Parameter,
-    /// A variable that is actually part of another function (either our caller or our callee), but is present in our function already
-    Inlined,
-    /// A variable that is actually a parameter of another function (either our caller or our callee), but is present in our function already
-    InlinedParameter,
-}
-
-impl VariableKind {
-    /// Returns the combination of two kinds.
-    /// E.g. `Parameter` and `Inlined` = `InlinedParameter`
-    #[must_use]
-    pub fn and(self, modifier: Self) -> Self {
-        match (self, modifier) {
-            (VariableKind::Normal, other) => other,
-            (VariableKind::Parameter, VariableKind::Inlined) => Self::InlinedParameter,
-            (VariableKind::Inlined, VariableKind::Parameter) => Self::InlinedParameter,
-            (s, _) => s,
-        }
-    }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VariableKind {
+    /// The variable is a zero-sized type
+    pub zero_sized: bool,
+    /// The variable is actually part of another function (either our caller or our callee), but is present in our function already
+    pub inlined: bool,
+    /// The variable is a parameter of a function
+    pub parameter: bool,
 }
 
 impl Display for VariableKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VariableKind::Normal => Ok(()),
-            VariableKind::Parameter => write!(f, "parameter"),
-            VariableKind::Inlined => write!(f, "inlined"),
-            VariableKind::InlinedParameter => write!(f, "inlined parameter"),
+        let mut elements = vec![];
+
+        if self.zero_sized {
+            elements.push("zero-sized");
         }
+        if self.inlined {
+            elements.push("inlined");
+        }
+        if self.parameter {
+            elements.push("parameter");
+        }
+
+        write!(f, "{}", elements.join(" "))
     }
 }
 
