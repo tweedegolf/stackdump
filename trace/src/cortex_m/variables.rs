@@ -673,11 +673,15 @@ fn get_variable_data(
 ///
 /// If it can be read, an Ok with the most literal value format is returned.
 /// If it can not be read, an Err is returned with a user displayable error.
-fn read_variable(
+/// 
+/// TODO: using strings is convenient, but not very nice. This should return proper types
+fn render_variable(
     variable_type: &VariableType,
     data: &BitSlice<u8, Lsb0>,
     device_memory: &DeviceMemory<u32>,
 ) -> Result<String, String> {
+    // We may not have enough data in some cases
+    // I don't know why that is, so let's just print a warning
     if ((data.len() / 8) as u64) < variable_type.byte_size() {
         log::warn!(
             "Variable of type {} has size of {}, but only {} bytes are available",
@@ -687,6 +691,7 @@ fn read_variable(
         );
     }
 
+    // Sometimes we have more data than we need. So we just need to trim that off
     let data = &data[..(variable_type.byte_size() as usize * 8).min(data.len())];
 
     fn read_base_type(
@@ -720,6 +725,7 @@ fn read_variable(
             gimli::constants::DW_ATE_float => match byte_size {
                 4 => {
                     let f = f32::from_bits(data.load_le::<u32>());
+                    // If the float is really big or small, then we want to format it using an exponent
                     if f.abs() >= 1_000_000_000.0 || f.abs() < (1.0 / 1_000_000_000.0) {
                         Ok(format!("{:e}", f))
                     } else {
@@ -728,6 +734,7 @@ fn read_variable(
                 }
                 8 => {
                     let f = f64::from_bits(data.load_le::<u64>());
+                    // If the float is really big or small, then we want to format it using an exponent
                     if f.abs() >= 1_000_000_000.0 || f.abs() < (1.0 / 1_000_000_000.0) {
                         Ok(format!("{:e}", f))
                     } else {
@@ -756,25 +763,32 @@ fn read_variable(
             let element_byte_size = array_type.byte_size() as usize;
             let element_data_chunks = data.chunks(element_byte_size * 8);
 
+            // We need to gather the value of all of the elements of the array
             let mut values = Vec::new();
 
             for chunk in element_data_chunks.take(*count as usize) {
-                values.push(read_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
+                values.push(render_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
             }
 
+            // Join all the values together in the array syntax
             Ok(format!("[{}]", values.join(", ")))
         }
         VariableType::PointerType { pointee_type, .. } => {
             // Cortex m, so pointer is little endian u32
+            // TODO: This should be made cross platform
             let address = data.load_le::<u32>() as u64;
             let pointee_size = pointee_type.byte_size() as u64;
+
+            // To render the pointer, we need to dereference it, so read the memory the pointer points to
             let pointee_memory = device_memory.read_slice(address..(address + pointee_size));
 
+            // Now render the object that the pointer points at
             let pointee_value = match pointee_memory {
-                Some(data) => read_variable(pointee_type, data.view_bits(), device_memory),
+                Some(data) => render_variable(pointee_type, data.view_bits(), device_memory),
                 None => Err(String::from("Not within available memory")),
             };
 
+            // We want to show everything, so the address, the dereferenced value and the type of the value
             Ok(format!(
                 "*{:#010X} (= {} ({}))",
                 address,
@@ -787,6 +801,9 @@ fn read_variable(
             underlying_type,
             enumerators,
         } => {
+            // We need to know what the underlying value is of the enum.
+            // With the current structure, the easiest thing to do is to render it and then parse it as an integer
+            // TODO: This should use proper types instead of strings
             let underlying_value = match underlying_type.deref() {
                 VariableType::BaseType {
                     encoding,
@@ -806,6 +823,8 @@ fn read_variable(
                 )
             })?;
 
+            // Try to get the variant that is used
+            // This does not work when the enum is used as flags
             let enumerator = enumerators
                 .iter()
                 .find(|e| e.const_value == underlying_value);
@@ -830,6 +849,8 @@ fn read_variable(
             members,
             ..
         } => {
+            // If the type is a string, then we want to render it as a string instead of as an array
+            // TODO: This kind of rendering should be placed somewhere else instead of here inline
             let string_render = if type_name == "&str" {
                 // Let's render the string nicely
                 let pointer = members
@@ -898,7 +919,7 @@ fn read_variable(
 
                             let member_value = match member_data {
                                 None => Err("Data not available".into()),
-                                Some(member_data) => read_variable(&member.member_type, member_data, device_memory),
+                                Some(member_data) => render_variable(&member.member_type, member_data, device_memory),
                             };
 
                             format!(
@@ -1037,7 +1058,7 @@ pub fn find_variables(
                     get_variable_data(device_memory, &variable_type, variable_location);
                 let variable_value = match variable_data {
                     Ok(variable_data) => {
-                        read_variable(&variable_type, &variable_data, device_memory)
+                        render_variable(&variable_type, &variable_data, device_memory)
                     }
                     Err(e) => Err(e),
                 };
