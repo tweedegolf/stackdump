@@ -8,7 +8,7 @@ See the docs of the respective operations.
 | Core    | [![crates.io](https://img.shields.io/crates/v/stackdump-core.svg)](https://crates.io/crates/stackdump-core)       | [![Documentation](https://docs.rs/stackdump-core/badge.svg)](https://docs.rs/stackdump-core)       | [link](core/README.md)    |
 | Capture | [![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture) | [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture) | [link](capture/README.md) |
 | Trace   | [![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace)     | [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)     | [link](trace/README.md)   |
-| Cli     | [![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli)         | [![Documentation](https://docs.rs/stackdump-cli/badge.svg)](https://docs.rs/stackdump-cli)         | [link](cli/README.md)     |
+| Cli     | [![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli)         |                                                                                                    | [link](cli/README.md)     |
 
 Currently only Cortex M is supported, but PR's are welcome!
 
