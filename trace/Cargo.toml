@@ -14,7 +14,7 @@ description = "Crate for tracing stack dumps"
 addr2line = "0.17.0"
 gimli = "0.26.1"
 bitvec = "1.0.0"
-stackdump-core = { path = "../core" }
+stackdump-core = { version = "0.1.0", path = "../core" }
 thiserror = "1.0.30"
 log = "0.4.14"
 

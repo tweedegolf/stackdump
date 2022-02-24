@@ -15,6 +15,6 @@ description = "Crate for capturing stack dumps"
 
 [dependencies]
 clap = { version = "3.1.2", features = ["derive", "color", "suggestions"] }
-stackdump-trace = { path = "../trace" }
+stackdump-trace = { version = "0.1.0", path = "../trace" }
 simple_logger = "2.1.0"
 log = "0.4.14"
