@@ -479,6 +479,10 @@ fn find_type(
     }
 }
 
+/// Runs the location evaluation of gimli.
+/// 
+/// - `location`: The `DW_AT_location` attribute value of the entry of the variable we want to get the location of.
+/// This may be a None if the variable has no location attribute.
 fn evaluate_location(
     context: &Context<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
@@ -486,11 +490,13 @@ fn evaluate_location(
     location: Option<Attribute<DefaultReader>>,
     frame_base: Option<u32>,
 ) -> Result<VariableLocationResult, TraceError> {
+    // First, we need to have the actual value
     let location = match location {
         Some(location) => location.value(),
         None => return Ok(VariableLocationResult::NoLocationAttribute),
     };
 
+    // Then we need to get the location expression. This expression can then later be evaluated by gimli.
     let location_expression = match location {
         AttributeValue::Block(ref data) => gimli::Expression(data.clone()),
         AttributeValue::Exprloc(ref data) => data.clone(),
@@ -518,8 +524,13 @@ fn evaluate_location(
         _ => unreachable!(),
     };
 
+    // Turn the expression into an evaluation
     let mut location_evaluation = location_expression.evaluation(unit.encoding());
 
+    // Now we need to evaluate everything.
+    // DWARF has a stack based instruction set that needs to be executed.
+    // Luckily, gimli already implements the bulk of it.
+    // The evaluation stops when it requires some memory that we need to provide.
     let mut result = location_evaluation.evaluate()?;
     while result != EvaluationResult::Complete {
         log::trace!("Location evaluation result: {:?}", result);
@@ -552,6 +563,13 @@ fn evaluate_location(
     }
 }
 
+/// Reads the data of a piece of memory
+/// 
+/// The [Piece] is an indirect result of the [evaluate_location] function.
+/// 
+/// - `device_memory`: The captured memory of the device
+/// - `piece`: The piece of memory location that tells us which data needs to be read
+/// - `variable_size`: The size of the variable in bytes
 fn get_piece_data(
     device_memory: &DeviceMemory<u32>,
     piece: Piece<DefaultReader, usize>,
@@ -596,6 +614,7 @@ fn get_piece_data(
         } => todo!("`ImplicitPointer` location not yet supported"),
     };
 
+    // The piece can also specify offsets and a size, so adapt what we've just read to that
     if let Some(data) = data.as_mut() {
         if let Some(offset) = piece.bit_offset {
             data.drain(0..offset as usize);
@@ -608,6 +627,7 @@ fn get_piece_data(
     Ok(data)
 }
 
+/// Get all of the available variable data based on the [VariableLocationResult] of the [evaluate_location] function.
 fn get_variable_data(
     device_memory: &DeviceMemory<u32>,
     variable_type: &VariableType,
@@ -628,10 +648,12 @@ fn get_variable_data(
         VariableLocationResult::LocationsFound(pieces) => {
             let mut data = BitVec::new();
 
+            // Get all the data of the pieces
             for piece in pieces {
                 let piece_data = get_piece_data(device_memory, piece, variable_size)?;
 
                 if let Some(mut piece_data) = piece_data {
+                    // TODO: Is this always in sequential order? We now assume that it is
                     data.append(&mut piece_data);
                 } else {
                     // Data is not on the stack
