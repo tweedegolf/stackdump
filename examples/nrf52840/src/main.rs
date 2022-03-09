@@ -6,7 +6,7 @@ use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
-use stackdump_capture::core::memory_region::{ArrayMemoryRegion, MemoryRegion};
+use stackdump_capture::core::memory_region::{ArrayMemoryRegion, MemoryRegion, SliceMemoryRegion};
 use stackdump_capture::core::register_data::RegisterData;
 
 #[link_section = ".uninit"]
@@ -95,6 +95,60 @@ fn do_loop(increment: &u32, double_trouble: bool, message: &str) -> f64 {
     }
 }
 
+fn get_data_section_dump() -> SliceMemoryRegion<'static> {
+    extern "C" {
+        static mut __sdata: u32;
+        static mut __edata: u32;
+    }
+
+    unsafe {
+        let start = &__sdata as *const u32 as u32;
+        let end = &__edata as *const u32 as u32;
+
+        rprintln!("Data section: {:#10X}..{:#10X}", start, end);
+
+        let mut section = SliceMemoryRegion::default();
+        section.copy_from_memory(start as *const u8, (end - start) as usize);
+        section
+    }
+}
+
+fn get_bss_section_dump() -> SliceMemoryRegion<'static> {
+    extern "C" {
+        static __sbss: u32;
+        static __ebss: u32;
+    }
+
+    unsafe {
+        let start = &__sbss as *const u32 as u32;
+        let end = &__ebss as *const u32 as u32;
+
+        rprintln!("Bss section: {:#10X}..{:#10X}", start, end);
+
+        let mut section = SliceMemoryRegion::default();
+        section.copy_from_memory(start as *const u8, (end - start) as usize);
+        section
+    }
+}
+
+fn get_uninit_section_dump() -> SliceMemoryRegion<'static> {
+    extern "C" {
+        static mut __suninit: u32;
+        static mut __euninit: u32;
+    }
+
+    unsafe {
+        let start = &__suninit as *const u32 as u32;
+        let end = &__euninit as *const u32 as u32;
+
+        rprintln!("Uninit section: {:#10X}..{:#10X}", start, end);
+
+        let mut section = SliceMemoryRegion::default();
+        section.copy_from_memory(start as *const u8, (end - start) as usize);
+        section
+    }
+}
+
 #[interrupt]
 fn TIMER0() {
     let timer = unsafe { &*nrf52840_hal::pac::TIMER0::ptr() };
@@ -103,7 +157,7 @@ fn TIMER0() {
     timer.events_compare[0].write(|w| w);
 
     unsafe {
-        cortex_m::interrupt::free(|cs| {   
+        cortex_m::interrupt::free(|cs| {
             let stack = &mut *STACKDUMP.as_mut_ptr();
             let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(stack, cs);
             rprintln!("{:2X?}", core_registers);
@@ -117,6 +171,15 @@ fn TIMER0() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
             for byte in stack.bytes() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
+            }
+            for byte in get_data_section_dump().bytes() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
+            }
+            for byte in get_bss_section_dump().bytes() {
+                DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
+            }
+            for byte in get_uninit_section_dump().bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);
             }
         });

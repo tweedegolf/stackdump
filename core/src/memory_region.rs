@@ -252,6 +252,42 @@ impl FromIterator<u8> for VecMemoryRegion {
     }
 }
 
+/// A memory region that is backed by a slice
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+pub struct SliceMemoryRegion<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> SliceMemoryRegion<'a> {
+    /// Creates a new memory region starting at the given address with the given data
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+}
+
+impl<'a> MemoryRegion for SliceMemoryRegion<'a> {
+    fn address_range(&self) -> Range<u64> {
+        let start_address = self.data.as_ptr() as u64;
+        start_address..(start_address + self.data.len() as u64)
+    }
+
+    fn read_slice(&self, index: Range<u64>) -> Option<&[u8]> {
+        let start = index.start.checked_sub(self.address_range().start)?;
+        let end = index.end.checked_sub(self.address_range().start)?;
+        self.data.get(start as usize..end as usize)
+    }
+
+    fn bytes(&self) -> MemoryRegionIterator {
+        MemoryRegionIterator::new(self.address_range().start, &self.data)
+    }
+
+    /// This function is especially unsafe.
+    /// The memory region will still reference the given data for its entire lifetime.
+    unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
+        self.data = core::slice::from_raw_parts(data_ptr, data_len);
+    }
+}
+
 /// An iterator that iterates over the serialized bytes of a memory region
 pub struct MemoryRegionIterator<'a> {
     start_address: u64,
