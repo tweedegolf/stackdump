@@ -20,6 +20,13 @@ struct Arguments {
     show_inlined_variables: bool,
     #[clap(short = 'z', long, help = "Print all traced zero-sized variables")]
     show_zero_sized_variables: bool,
+    #[clap(
+        short = 'l',
+        long,
+        help = "Cap the line length so it doesn't wrap more than the given amount of time. Use 0 for uncapped.",
+        default_value_t = 5
+    )]
+    max_wrapping_lines: usize,
 }
 
 #[derive(Subcommand, Debug)]
@@ -72,20 +79,60 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Trace the stackdump
             let frames = stackdump_trace::cortex_m::trace(device_memory, &elf_data)?;
 
+            let terminal_size = termsize::get();
+
             // Display the frames
             for (i, frame) in frames.iter().enumerate() {
-                println!(
-                    "{}: {}",
-                    i,
-                    frame.display(
-                        true,
-                        args.show_inlined_variables,
-                        args.show_inlined_variables
-                    )
+                print!("{}: ", i);
+
+                let frame_text = frame.display(
+                    true,
+                    args.show_inlined_variables,
+                    args.show_inlined_variables,
                 );
+
+                for line in frame_text.lines() {
+                    if let Some(terminal_size) = terminal_size.as_ref() {
+                        if args.max_wrapping_lines != 0
+                            && line.chars().count()
+                                > terminal_size.cols as usize * args.max_wrapping_lines
+                        {
+                            println!(
+                                "{}... ({} more)",
+                                truncate(
+                                    line,
+                                    terminal_size.cols as usize * args.max_wrapping_lines
+                                ),
+                                div_ceil(line.chars().count(), terminal_size.cols as usize)
+                                    - args.max_wrapping_lines
+                            );
+                        } else {
+                            println!("{}", line);
+                        }
+                    } else {
+                        println!("{}", line);
+                    }
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn truncate(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        None => s,
+        Some((idx, _)) => &s[..idx],
+    }
+}
+
+fn div_ceil(lhs: usize, rhs: usize) -> usize {
+    let d = lhs / rhs;
+    let r = lhs % rhs;
+    if r > 0 && rhs > 0 {
+        d + 1
+    } else {
+        d
+    }
 }
