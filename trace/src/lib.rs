@@ -106,6 +106,8 @@ pub enum FrameType {
     Exception,
     /// The frame could not be (fully) read, so the frame is corrupted. The string says what the problem is.
     Corrupted(String),
+    /// This is not really a frame, but has all the statically available data
+    Static,
 }
 
 /// A variable that was found in the tracing procedure

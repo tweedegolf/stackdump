@@ -11,11 +11,10 @@ use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     Enumerator, Location, StructureMember, TemplateTypeParam, Variable, VariableKind, VariableType,
 };
-use addr2line::Context;
 use bitvec::prelude::*;
 use gimli::{
-    Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, EndianReader, EntriesTree,
-    EvaluationResult, Piece, Reader, RunTimeEndian, Unit,
+    Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, Dwarf, EndianReader,
+    EntriesTree, EvaluationResult, Piece, Reader, RunTimeEndian, Unit,
 };
 use stackdump_core::device_memory::DeviceMemory;
 use std::{ops::Deref, rc::Rc};
@@ -24,14 +23,14 @@ type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
 /// Gets the string value from the `DW_AT_name` attribute of the given entry
 fn get_entry_name(
-    context: &Context<DefaultReader>,
+    dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<String, TraceError> {
     // Find the attribute
     let name_attr = entry.required_attr(unit, gimli::constants::DW_AT_name)?;
     // Read as a string type
-    let attr_string = context.dwarf().attr_string(unit, name_attr.value())?;
+    let attr_string = dwarf.attr_string(unit, name_attr.value())?;
     // Convert to String
     Ok(attr_string.to_string()?.into())
 }
@@ -89,12 +88,38 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
     Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
 }
 
+fn try_read_frame_base(
+    dwarf: &Dwarf<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
+    device_memory: &DeviceMemory<u32>,
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
+) -> Result<Option<u32>, TraceError> {
+    let frame_base_location = evaluate_location(
+        dwarf,
+        unit,
+        device_memory,
+        entry.attr(gimli::constants::DW_AT_frame_base)?,
+        None,
+    )?;
+    let frame_base_data = get_variable_data(
+        device_memory,
+        &VariableType::BaseType {
+            name: String::from("frame_base"),
+            encoding: gimli::constants::DW_ATE_unsigned,
+            byte_size: 4, // Frame base is 4 bytes on cortex-m
+        },
+        frame_base_location,
+    );
+
+    Ok(frame_base_data.ok().map(|data| data.load_le()))
+}
+
 /// Finds the [Location] of the given entry.
 ///
 /// This is done based on the `DW_AT_decl_file`, `DW_AT_decl_line` and `DW_AT_decl_column` attributes.
 /// These are normally present on variables and functions.
 fn find_entry_location<'unit>(
-    context: &Context<DefaultReader>,
+    dwarf: &Dwarf<DefaultReader>,
     unit: &'unit Unit<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<Location, TraceError> {
@@ -156,18 +181,14 @@ fn find_entry_location<'unit>(
                 if let Some(directory) = file_entry.directory(line_program.header()) {
                     path_push(
                         &mut path,
-                        &context
-                            .dwarf()
-                            .attr_string(unit, directory)?
-                            .to_string_lossy()?,
+                        &dwarf.attr_string(unit, directory)?.to_string_lossy()?,
                     )
                 }
             }
 
             path_push(
                 &mut path,
-                &context
-                    .dwarf()
+                &dwarf
                     .attr_string(unit, file_entry.path_name())?
                     .to_string()?,
             );
@@ -192,7 +213,7 @@ fn find_entry_location<'unit>(
 /// The given node should come from the [get_entry_type_reference_tree]
 /// and [get_entry_abstract_origin_reference_tree] functions.
 fn find_type(
-    context: &Context<DefaultReader>,
+    dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
@@ -214,7 +235,7 @@ fn find_type(
             // - the members of the object
             // - the byte size of the object
 
-            let type_name = get_entry_name(context, unit, entry)?;
+            let type_name = get_entry_name(dwarf, unit, entry)?;
             let mut members = Vec::new();
             let mut type_params = Vec::new();
             let byte_size = entry
@@ -236,7 +257,7 @@ fn find_type(
                 // Type parameters only have a name and a type.
                 // The rest of the children are ignored.
 
-                let member_name = match get_entry_name(context, unit, member_entry) {
+                let member_name = match get_entry_name(dwarf, unit, member_entry) {
                     Ok(member_name) => member_name,
                     Err(_) => continue, // Only care about named members for now
                 };
@@ -246,7 +267,7 @@ fn find_type(
                         |mut type_tree| {
                             type_tree
                                 .root()
-                                .map(|root| find_type(context, unit, abbreviations, root))
+                                .map(|root| find_type(dwarf, unit, abbreviations, root))
                         },
                     )??
                 };
@@ -314,7 +335,7 @@ fn find_type(
 
             // We record the name, the encoding and the size of the primitive
 
-            let name = get_entry_name(context, unit, entry)?;
+            let name = get_entry_name(dwarf, unit, entry)?;
             let encoding = entry
                 .required_attr(unit, gimli::constants::DW_AT_encoding)
                 .map(|attr| {
@@ -345,14 +366,14 @@ fn find_type(
                 |mut type_tree| {
                     type_tree
                         .root()
-                        .map(|root| find_type(context, unit, abbreviations, root))
+                        .map(|root| find_type(dwarf, unit, abbreviations, root))
                 },
             )???;
 
             // Some pointers don't have names, but generally it is just `&<typename>`
             // So if only the name is missing, we can recover
 
-            let name = get_entry_name(context, unit, entry)
+            let name = get_entry_name(dwarf, unit, entry)
                 .unwrap_or_else(|_| format!("&{}", pointee_type.type_name()));
 
             // The debug info also contains an address class that can describe what kind of pointer it is.
@@ -384,7 +405,7 @@ fn find_type(
                 |mut type_tree| {
                     type_tree
                         .root()
-                        .map(|root| find_type(context, unit, abbreviations, root))
+                        .map(|root| find_type(dwarf, unit, abbreviations, root))
                 },
             )???;
 
@@ -432,12 +453,12 @@ fn find_type(
             // Enums have a name and also an underlying_type (which is usually an integer).
             // The entry also has a child `DW_TAG_enumerator` for each variant.
 
-            let name = get_entry_name(context, unit, entry)?;
+            let name = get_entry_name(dwarf, unit, entry)?;
             let underlying_type = get_entry_type_reference_tree(unit, abbreviations, entry)
                 .map(|mut type_tree| {
                 type_tree
                     .root()
-                    .map(|root| find_type(context, unit, abbreviations, root))
+                    .map(|root| find_type(dwarf, unit, abbreviations, root))
             })???;
 
             let mut enumerators = Vec::new();
@@ -455,7 +476,7 @@ fn find_type(
                 // If the enum has that value, then the enum is of that variant.
                 // This does of course not work for flag enums.
 
-                let enumerator_name = get_entry_name(context, unit, enumerator_entry)?;
+                let enumerator_name = get_entry_name(dwarf, unit, enumerator_entry)?;
                 let const_value = enumerator_entry
                     .required_attr(unit, gimli::constants::DW_AT_const_value)?
                     .required_sdata_value()?;
@@ -480,11 +501,11 @@ fn find_type(
 }
 
 /// Runs the location evaluation of gimli.
-/// 
+///
 /// - `location`: The `DW_AT_location` attribute value of the entry of the variable we want to get the location of.
 /// This may be a None if the variable has no location attribute.
 fn evaluate_location(
-    context: &Context<DefaultReader>,
+    dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     device_memory: &DeviceMemory<u32>,
     location: Option<Attribute<DefaultReader>>,
@@ -501,7 +522,7 @@ fn evaluate_location(
         AttributeValue::Block(ref data) => gimli::Expression(data.clone()),
         AttributeValue::Exprloc(ref data) => data.clone(),
         AttributeValue::LocationListsRef(l) => {
-            let mut locations = context.dwarf().locations(unit, l)?;
+            let mut locations = dwarf.locations(unit, l)?;
             let mut location = None;
 
             while let Ok(Some(maybe_location)) = locations.next() {
@@ -551,6 +572,10 @@ fn evaluate_location(
                     frame_base.ok_or(TraceError::UnknownFrameBase)? as u64,
                 )?;
             }
+            EvaluationResult::RequiresRelocatedAddress(address) => {
+                // We have no relocations of code
+                result = location_evaluation.resume_with_relocated_address(address)?;
+            }
             r => return Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(r)),
         }
     }
@@ -564,15 +589,15 @@ fn evaluate_location(
 }
 
 /// Reads the data of a piece of memory
-/// 
+///
 /// The [Piece] is an indirect result of the [evaluate_location] function.
-/// 
+///
 /// - `device_memory`: The captured memory of the device
 /// - `piece`: The piece of memory location that tells us which data needs to be read
 /// - `variable_size`: The size of the variable in bytes
 fn get_piece_data(
     device_memory: &DeviceMemory<u32>,
-    piece: Piece<DefaultReader, usize>,
+    piece: &Piece<DefaultReader, usize>,
     variable_size: u64,
 ) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, String> {
     let mut data = match piece.location.clone() {
@@ -636,36 +661,34 @@ fn get_variable_data(
     let variable_size = variable_type.byte_size();
 
     match variable_location {
-        VariableLocationResult::NoLocationAttribute => {
-            Err("Optimized away (No location attribute)".into())
-        }
-        VariableLocationResult::LocationListNotFound => {
-            Err("Location list not found for the current PC value (A variable lower on the stack may contain the value)".into())
-        }
-        VariableLocationResult::NoLocationFound => {
-            Err("Optimized away (No location at this point)".into())
-        }
+        VariableLocationResult::NoLocationAttribute => Err("Optimized away (always)".into()),
+        VariableLocationResult::LocationListNotFound => Err("Optimized away".into()),
+        VariableLocationResult::NoLocationFound => Err("Optimized away".into()),
         VariableLocationResult::LocationsFound(pieces) => {
             let mut data = BitVec::new();
 
             // Get all the data of the pieces
             for piece in pieces {
-                let piece_data = get_piece_data(device_memory, piece, variable_size)?;
+                let piece_data = get_piece_data(device_memory, &piece, variable_size)?;
 
                 if let Some(mut piece_data) = piece_data {
                     // TODO: Is this always in sequential order? We now assume that it is
                     data.append(&mut piece_data);
                 } else {
                     // Data is not on the stack
-                    return Err("Data is not available in registers or stack".into());
+                    return Err(format!(
+                        "Data is not available in device memory: {:X?}",
+                        piece.location
+                    ));
                 };
             }
 
             Ok(data)
         }
-        VariableLocationResult::LocationEvaluationStepNotImplemented(step) => {
-            Err(format!("A required step of the location evaluation logic has not been implemented yet: {:?}", step))
-        },
+        VariableLocationResult::LocationEvaluationStepNotImplemented(step) => Err(format!(
+            "A required step of the location evaluation logic has not been implemented yet: {:?}",
+            step
+        )),
     }
 }
 
@@ -673,7 +696,7 @@ fn get_variable_data(
 ///
 /// If it can be read, an Ok with the most literal value format is returned.
 /// If it can not be read, an Err is returned with a user displayable error.
-/// 
+///
 /// TODO: using strings is convenient, but not very nice. This should return proper types
 fn render_variable(
     variable_type: &VariableType,
@@ -767,7 +790,8 @@ fn render_variable(
             let mut values = Vec::new();
 
             for chunk in element_data_chunks.take(*count as usize) {
-                values.push(render_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
+                values
+                    .push(render_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
             }
 
             // Join all the values together in the array syntax
@@ -939,167 +963,247 @@ fn render_variable(
     }
 }
 
-pub fn find_variables(
-    context: &Context<DefaultReader>,
+fn read_variable_entry(
+    dwarf: &Dwarf<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
+    abbreviations: &Abbreviations,
+    device_memory: &DeviceMemory<u32>,
+    frame_base: Option<u32>,
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
+) -> Result<Option<Variable>, TraceError> {
+    let mut abstract_origin_tree =
+        get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
+    let abstract_origin_node = abstract_origin_tree
+        .as_mut()
+        .and_then(|tree| tree.root().ok());
+    let abstract_origin_entry = abstract_origin_node.as_ref().map(|node| node.entry());
+
+    // Get the name of the variable
+    let variable_name = get_entry_name(dwarf, unit, entry);
+
+    // Alternatively, get the name from the abstract origin
+    let mut variable_name = match (variable_name, abstract_origin_entry) {
+        (Err(_), Some(entry)) => get_entry_name(dwarf, unit, entry),
+        (variable_name, _) => variable_name,
+    };
+
+    if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
+        log::trace!("Formal parameter does not have a name, renaming it to 'param'");
+        variable_name = Ok("param".into());
+    }
+
+    // Get the type of the variable
+    let variable_type =
+        get_entry_type_reference_tree(unit, abbreviations, entry).and_then(|mut type_tree| {
+            let type_root = type_tree.root()?;
+            find_type(dwarf, unit, abbreviations, type_root)
+        });
+
+    // Alternatively, get the type from the abstract origin
+    let variable_type = match (variable_type, abstract_origin_entry) {
+        (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
+            .and_then(|mut type_tree| {
+                let type_root = type_tree.root()?;
+                find_type(dwarf, unit, abbreviations, type_root)
+            }),
+        (variable_type, _) => variable_type,
+    };
+
+    let variable_kind = VariableKind {
+        zero_sized: variable_type
+            .as_ref()
+            .map(|vt| vt.byte_size() == 0)
+            .unwrap_or_default(),
+        inlined: abstract_origin_entry.is_some(),
+        parameter: entry.tag() == gimli::constants::DW_TAG_formal_parameter,
+    };
+
+    // Get the location of the variable
+    let mut variable_file_location = find_entry_location(dwarf, unit, entry)?;
+    if let (None, Some(abstract_origin_entry)) =
+        (&variable_file_location.file, abstract_origin_entry)
+    {
+        variable_file_location = find_entry_location(dwarf, unit, abstract_origin_entry)?;
+    }
+
+    match (variable_name, variable_type) {
+        (Ok(variable_name), Ok(variable_type)) if variable_type.byte_size() == 0 => {
+            Ok(Some(Variable {
+                name: variable_name,
+                kind: variable_kind,
+                value: Ok("{ (ZST) }".into()),
+                variable_type,
+                location: variable_file_location,
+            }))
+        }
+        (Ok(variable_name), Ok(variable_type)) => {
+            let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
+
+            let location_attr = match (location_attr, abstract_origin_entry) {
+                (None, Some(entry)) => entry.attr(gimli::constants::DW_AT_location)?,
+                (location_attr, _) => location_attr,
+            };
+
+            // Get the location of the variable
+            let variable_location =
+                evaluate_location(dwarf, unit, device_memory, location_attr, frame_base)?;
+
+            let variable_data = get_variable_data(device_memory, &variable_type, variable_location);
+            let variable_value = match variable_data {
+                Ok(variable_data) => render_variable(&variable_type, &variable_data, device_memory),
+                Err(e) => Err(e),
+            };
+
+            Ok(Some(Variable {
+                name: variable_name,
+                kind: variable_kind,
+                value: variable_value,
+                variable_type,
+                location: variable_file_location,
+            }))
+        }
+        (Ok(variable_name), Err(type_error)) => {
+            log::debug!(
+                "Could not read the type of variable `{}`: {}",
+                variable_name,
+                type_error
+            );
+            return Ok(None);
+        }
+        (Err(name_error), _) => {
+            log::debug!("Could not get the name of a variable: {}", name_error);
+            return Ok(None);
+        }
+    }
+}
+
+pub fn find_variables_in_function(
+    dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     device_memory: &DeviceMemory<u32>,
     node: gimli::EntriesTreeNode<DefaultReader>,
-    variables: &mut Vec<Variable>,
-    mut frame_base: Option<u32>,
-) -> Result<(), TraceError> {
-    let entry = node.entry();
+) -> Result<Vec<Variable>, TraceError> {
+    fn recursor(
+        dwarf: &Dwarf<DefaultReader>,
+        unit: &Unit<DefaultReader, usize>,
+        abbreviations: &Abbreviations,
+        device_memory: &DeviceMemory<u32>,
+        node: gimli::EntriesTreeNode<DefaultReader>,
+        variables: &mut Vec<Variable>,
+        mut frame_base: Option<u32>,
+    ) -> Result<(), TraceError> {
+        let entry = node.entry();
 
-    log::trace!(
-        "Checking out the entry @ .debug_info: {:X}",
-        unit.header.offset().as_debug_info_offset().unwrap().0 + entry.offset().0
-    );
+        log::trace!(
+            "Checking out the entry @ .debug_info: {:X}",
+            unit.header.offset().as_debug_info_offset().unwrap().0 + entry.offset().0
+        );
 
-    let frame_base_location = evaluate_location(
-        context,
-        unit,
-        device_memory,
-        entry.attr(gimli::constants::DW_AT_frame_base)?,
-        frame_base,
-    )?;
-    let frame_base_data = get_variable_data(
-        device_memory,
-        &VariableType::BaseType {
-            name: String::from("frame_base"),
-            encoding: gimli::constants::DW_ATE_unsigned,
-            byte_size: 4, // Frame base is 4 bytes on cortex-m
-        },
-        frame_base_location,
-    );
-    if let Ok(data) = frame_base_data {
-        frame_base = Some(data.load_le())
-    }
-
-    if entry.tag() == gimli::constants::DW_TAG_variable
-        || entry.tag() == gimli::constants::DW_TAG_formal_parameter
-    {
-        let mut abstract_origin_tree =
-            get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
-        let abstract_origin_node = abstract_origin_tree
-            .as_mut()
-            .and_then(|tree| tree.root().ok());
-        let abstract_origin_entry = abstract_origin_node.as_ref().map(|node| node.entry());
-
-        // Get the name of the variable
-        let variable_name = get_entry_name(context, unit, entry);
-
-        // Alternatively, get the name from the abstract origin
-        let mut variable_name = match (variable_name, abstract_origin_entry) {
-            (Err(_), Some(entry)) => get_entry_name(context, unit, entry),
-            (variable_name, _) => variable_name,
-        };
-
-        if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
-            log::trace!("Formal parameter does not have a name, renaming it to 'param'");
-            variable_name = Ok("param".into());
+        if let Some(new_frame_base) = try_read_frame_base(dwarf, unit, device_memory, entry)? {
+            frame_base = Some(new_frame_base);
         }
 
-        // Get the type of the variable
-        let variable_type =
-            get_entry_type_reference_tree(unit, abbreviations, entry).and_then(|mut type_tree| {
-                let type_root = type_tree.root()?;
-                find_type(context, unit, abbreviations, type_root)
-            });
-
-        // Alternatively, get the type from the abstract origin
-        let variable_type = match (variable_type, abstract_origin_entry) {
-            (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
-                .and_then(|mut type_tree| {
-                    let type_root = type_tree.root()?;
-                    find_type(context, unit, abbreviations, type_root)
-                }),
-            (variable_type, _) => variable_type,
-        };
-
-        let variable_kind = VariableKind {
-            zero_sized: variable_type
-                .as_ref()
-                .map(|vt| vt.byte_size() == 0)
-                .unwrap_or_default(),
-            inlined: abstract_origin_entry.is_some(),
-            parameter: entry.tag() == gimli::constants::DW_TAG_formal_parameter,
-        };
-
-        // Get the location of the variable
-        let mut variable_file_location = find_entry_location(context, unit, entry)?;
-        if let (None, Some(abstract_origin_entry)) =
-            (&variable_file_location.file, abstract_origin_entry)
+        if entry.tag() == gimli::constants::DW_TAG_variable
+            || entry.tag() == gimli::constants::DW_TAG_formal_parameter
         {
-            variable_file_location = find_entry_location(context, unit, abstract_origin_entry)?;
-        }
-
-        match (variable_name, variable_type) {
-            (Ok(variable_name), Ok(variable_type)) if variable_type.byte_size() == 0 => variables
-                .push(Variable {
-                    name: variable_name,
-                    kind: variable_kind,
-                    value: Ok("{ (ZST) }".into()),
-                    variable_type,
-                    location: variable_file_location,
-                }),
-            (Ok(variable_name), Ok(variable_type)) => {
-                let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
-
-                let location_attr = match (location_attr, abstract_origin_entry) {
-                    (None, Some(entry)) => entry.attr(gimli::constants::DW_AT_location)?,
-                    (location_attr, _) => location_attr,
-                };
-
-                // Get the location of the variable
-                let variable_location =
-                    evaluate_location(context, unit, device_memory, location_attr, frame_base)?;
-
-                let variable_data =
-                    get_variable_data(device_memory, &variable_type, variable_location);
-                let variable_value = match variable_data {
-                    Ok(variable_data) => {
-                        render_variable(&variable_type, &variable_data, device_memory)
-                    }
-                    Err(e) => Err(e),
-                };
-
-                variables.push(Variable {
-                    name: variable_name,
-                    kind: variable_kind,
-                    value: variable_value,
-                    variable_type,
-                    location: variable_file_location,
-                })
-            }
-            (Ok(variable_name), Err(type_error)) => {
-                log::debug!(
-                    "Could not read the type of variable `{}`: {}",
-                    variable_name,
-                    type_error
-                );
-                return Ok(());
-            }
-            (Err(name_error), _) => {
-                log::debug!("Could not get the name of a variable: {}", name_error);
-                return Ok(());
+            if let Some(variable) =
+                read_variable_entry(dwarf, unit, abbreviations, device_memory, frame_base, entry)?
+            {
+                variables.push(variable);
             }
         }
+
+        let mut children = node.children();
+        while let Some(child) = children.next()? {
+            recursor(
+                dwarf,
+                unit,
+                abbreviations,
+                device_memory,
+                child,
+                variables,
+                frame_base,
+            )?;
+        }
+
+        Ok(())
     }
 
-    let mut children = node.children();
-    while let Some(child) = children.next()? {
-        find_variables(
-            context,
-            unit,
-            abbreviations,
+    let mut variables = Vec::new();
+    recursor(
+        dwarf,
+        unit,
+        abbreviations,
+        device_memory,
+        node,
+        &mut variables,
+        None,
+    )?;
+    Ok(variables)
+}
+
+pub fn find_static_variables(
+    dwarf: &Dwarf<DefaultReader>,
+    device_memory: &DeviceMemory<u32>,
+) -> Result<Vec<Variable>, TraceError> {
+    fn recursor(
+        dwarf: &Dwarf<DefaultReader>,
+        unit: &Unit<DefaultReader, usize>,
+        abbreviations: &Abbreviations,
+        device_memory: &DeviceMemory<u32>,
+        node: gimli::EntriesTreeNode<DefaultReader>,
+        variables: &mut Vec<Variable>,
+    ) -> Result<(), TraceError> {
+        let entry = node.entry();
+
+        match entry.tag() {
+            gimli::constants::DW_TAG_compile_unit => {}
+            gimli::constants::DW_TAG_namespace => {}
+            gimli::constants::DW_TAG_structure_type
+            | gimli::constants::DW_TAG_subprogram
+            | gimli::constants::DW_TAG_enumeration_type
+            | gimli::constants::DW_TAG_base_type
+            | gimli::constants::DW_TAG_array_type
+            | gimli::constants::DW_TAG_pointer_type
+            | gimli::constants::DW_TAG_subroutine_type
+            | gimli::constants::DW_TAG_union_type => return Ok(()),
+            gimli::constants::DW_TAG_variable => {
+                if let Some(variable) =
+                    read_variable_entry(dwarf, unit, abbreviations, device_memory, None, entry)?
+                {
+                    variables.push(variable);
+                }
+            }
+            tag => {
+                log::error!("Unexpected tag in the search of static variables: {}", tag);
+                return Ok(());
+            }
+        }
+
+        let mut children = node.children();
+        while let Some(child) = children.next()? {
+            recursor(dwarf, unit, abbreviations, device_memory, child, variables)?;
+        }
+
+        Ok(())
+    }
+
+    let mut variables = Vec::new();
+    let mut units = dwarf.units();
+    while let Some(unit_header) = units.next()? {
+        let abbreviations = dwarf.abbreviations(&unit_header)?;
+        recursor(
+            dwarf,
+            &dwarf.unit(unit_header.clone())?,
+            &abbreviations,
             device_memory,
-            child,
-            variables,
-            frame_base,
+            unit_header.entries_tree(&abbreviations, None)?.root()?,
+            &mut variables,
         )?;
     }
 
-    Ok(())
+    Ok(variables)
 }
 
 #[derive(Debug)]

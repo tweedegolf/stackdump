@@ -1,7 +1,7 @@
 //! Trace implementation for the cortex m target
 
 use crate::error::TraceError;
-use crate::{Frame, FrameType};
+use crate::{Frame, FrameType, Location};
 use addr2line::{
     object::{File, Object, ObjectSection, ObjectSymbol, SectionKind},
     Context,
@@ -133,14 +133,12 @@ impl<'data> UnwindingContext<'data> {
                 };
 
                 if let Ok(entry_root) = entries.root() {
-                    variables::find_variables(
-                        &self.addr2line_context,
+                    variables = variables::find_variables_in_function(
+                        &self.addr2line_context.dwarf(),
                         unit,
                         &abbreviations,
                         &self.device_memory,
                         entry_root,
-                        &mut variables,
-                        None,
                     )?;
                 }
             }
@@ -508,36 +506,22 @@ pub fn trace(
         }
     }
 
+    // Get the static data
+    let static_variables = variables::find_static_variables(
+        &context.addr2line_context.dwarf(),
+        &context.device_memory,
+    )?;
+    let static_frame = Frame {
+        function: "Static".into(),
+        location: Location {
+            file: None,
+            line: None,
+            column: None,
+        },
+        frame_type: FrameType::Static,
+        variables: static_variables,
+    };
+    frames.push(static_frame);
+
     Ok(frames)
-}
-
-#[cfg(test)]
-mod tests {
-    use stackdump_core::register_data::VecRegisterData;
-
-    use super::*;
-
-    const ELF: &[u8] = include_bytes!("../../../examples/data/nrf52840");
-    const DUMP: &[u8] = include_bytes!("../../../examples/data/nrf52840.dump");
-
-    #[test]
-    fn example_dump() {
-        simple_logger::SimpleLogger::new()
-            .with_level(log::LevelFilter::Debug)
-            .init()
-            .unwrap();
-
-        let mut dump_iter = DUMP.iter().copied();
-
-        let mut device_memory = DeviceMemory::new();
-
-        device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
-        device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
-        device_memory.add_memory_region(VecMemoryRegion::from_iter(&mut dump_iter));
-
-        let frames = trace(device_memory, ELF).unwrap();
-        for (i, frame) in frames.iter().enumerate() {
-            println!("{}: {}", i, frame);
-        }
-    }
 }
