@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.2 (09-03-22)
+
 - Static variables are now also traced
 - Extra CLI option `-l` for capping how many times lines can wrap. This is useful for when tracing contains e.g. a long array type
 - Added `SliceMemoryRegion` that can act as a memory region, but always borrows all its data. This is useful for when the region can't be owned, but is not referenced anywhere else
