@@ -17,6 +17,7 @@ bitvec = "1.0.0"
 stackdump-core = { version = "0.1.2", path = "../core" }
 thiserror = "1.0.30"
 log = "0.4.14"
+trees = "0.4.2"
 
 [dev-dependencies]
 simple_logger = "2.1.0"

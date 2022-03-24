@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 
 use std::fmt::Display;
 
@@ -8,6 +8,7 @@ pub use stackdump_core;
 pub mod cortex_m;
 pub mod error;
 mod gimli_extensions;
+pub mod type_value_tree;
 
 /// A source code location
 #[derive(Debug, Clone)]
