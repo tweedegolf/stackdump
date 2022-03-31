@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.3 (31-03-22)
+
 - Fixed the CLI where it used `show_inlined_variables` instead of `show_zero_sized_variables`
 - Added a couple more tags to ignore when searching for static variables
 

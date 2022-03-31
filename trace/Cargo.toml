@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-trace"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
@@ -14,7 +14,7 @@ description = "Crate for tracing stack dumps"
 addr2line = "0.17.0"
 gimli = "0.26.1"
 bitvec = "1.0.0"
-stackdump-core = { version = "0.1.2", path = "../core" }
+stackdump-core = { version = "0.1.3", path = "../core" }
 thiserror = "1.0.30"
 log = "0.4.14"
 
