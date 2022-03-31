@@ -1167,6 +1167,9 @@ pub fn find_static_variables(
             | gimli::constants::DW_TAG_array_type
             | gimli::constants::DW_TAG_pointer_type
             | gimli::constants::DW_TAG_subroutine_type
+            | gimli::constants::DW_TAG_typedef
+            | gimli::constants::DW_TAG_restrict_type
+            | gimli::constants::DW_TAG_const_type
             | gimli::constants::DW_TAG_union_type => return Ok(()),
             gimli::constants::DW_TAG_variable => {
                 if let Some(variable) =
