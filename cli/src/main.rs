@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let frame_text = frame.display(
                     true,
                     args.show_inlined_variables,
-                    args.show_inlined_variables,
+                    args.show_zero_sized_variables,
                 );
 
                 for line in frame_text.lines() {

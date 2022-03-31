@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the CLI where it used `show_inlined_variables` instead of `show_zero_sized_variables`
+
 ## 0.1.2 (09-03-22)
 
 - Static variables are now also traced
