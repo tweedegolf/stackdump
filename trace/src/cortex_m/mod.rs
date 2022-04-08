@@ -91,7 +91,7 @@ impl<'data> UnwindingContext<'data> {
         })
     }
 
-    pub fn find_current_frames(&mut self, frames: &mut Vec<Frame>) -> Result<(), TraceError> {
+    pub fn find_current_frames(&mut self, frames: &mut Vec<Frame<u32>>) -> Result<(), TraceError> {
         // Find the frames of the current register context
         let mut context_frames = self
             .addr2line_context
@@ -169,8 +169,8 @@ impl<'data> UnwindingContext<'data> {
     /// Returns the next frame and true if there are more frames or false if there are no more frames left
     pub fn try_unwind(
         &mut self,
-        last_frame: Option<&mut Frame>,
-    ) -> Result<(Option<Frame>, bool), TraceError> {
+        last_frame: Option<&mut Frame<u32>>,
+    ) -> Result<(Option<Frame<u32>>, bool), TraceError> {
         let unwind_info = self.debug_frame.unwind_info_for_address(
             &self.bases,
             &mut self.unwind_context,
@@ -484,7 +484,7 @@ impl<'data> UnwindingContext<'data> {
 pub fn trace(
     device_memory: DeviceMemory<u32>,
     elf_data: &[u8],
-) -> Result<Vec<crate::Frame>, TraceError> {
+) -> Result<Vec<Frame<u32>>, TraceError> {
     let mut frames = Vec::new();
 
     let elf = addr2line::object::File::parse(elf_data)?;

@@ -9,17 +9,18 @@
 use super::TraceError;
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
-    Enumerator, Location, StructureMember, TemplateTypeParam, Variable, VariableKind, VariableType,
+    type_value_tree::{
+        variable_type::{Archetype, VariableType},
+        TypeValue, TypeValueTree,
+    },
+    DefaultReader, Location, Variable, VariableKind, VariableLocationResult,
 };
 use bitvec::prelude::*;
 use gimli::{
-    Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, Dwarf, EndianReader,
-    EntriesTree, EvaluationResult, Piece, Reader, RunTimeEndian, Unit,
+    Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, Dwarf, EntriesTree,
+    EvaluationResult, Piece, Reader, Unit,
 };
 use stackdump_core::device_memory::DeviceMemory;
-use std::{ops::Deref, rc::Rc};
-
-type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
 /// Gets the string value from the `DW_AT_name` attribute of the given entry
 fn get_entry_name(
@@ -208,16 +209,17 @@ fn find_entry_location<'unit>(
     })
 }
 
-/// Decodes the type of an entry.
+/// Decodes the type of an entry into a type value tree, however, the value is not yet filled in.
 ///
 /// The given node should come from the [get_entry_type_reference_tree]
 /// and [get_entry_abstract_origin_reference_tree] functions.
-fn find_type(
+fn build_type_value_tree(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
-) -> Result<VariableType, TraceError> {
+    type_value_tree: &mut TypeValueTree<u32>,
+) -> Result<(), TraceError> {
     // Get the root entry and its tag
     let entry = node.entry();
     let entry_tag = entry.tag().to_string();
@@ -236,11 +238,19 @@ fn find_type(
             // - the byte size of the object
 
             let type_name = get_entry_name(dwarf, unit, entry)?;
-            let mut members = Vec::new();
-            let mut type_params = Vec::new();
             let byte_size = entry
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
+            let archetype = match tag {
+                gimli::constants::DW_TAG_structure_type => Archetype::Structure,
+                gimli::constants::DW_TAG_union_type => Archetype::Union,
+                gimli::constants::DW_TAG_class_type => Archetype::Class,
+            };
+
+            type_value_tree.data_mut().variable_type.name = type_name;
+            type_value_tree.data_mut().variable_type.archetype = archetype;
+            type_value_tree.data_mut().bit_range.end =
+                type_value_tree.data_mut().bit_range.start + byte_size * 8;
 
             // The members of the object can be found by looking at the children of the node
             let mut children = node.children();
@@ -249,7 +259,6 @@ fn find_type(
 
                 // Object children can be a couple of things:
                 // - Member fields
-                // - Type parameters
                 // - Sub programs (methods)
                 // - Other objects (TODO what does this mean?)
 
@@ -262,16 +271,6 @@ fn find_type(
                     Err(_) => continue, // Only care about named members for now
                 };
 
-                let member_type = || {
-                    get_entry_type_reference_tree(unit, abbreviations, member_entry).map(
-                        |mut type_tree| {
-                            type_tree
-                                .root()
-                                .map(|root| find_type(dwarf, unit, abbreviations, root))
-                        },
-                    )??
-                };
-
                 match member_entry.tag() {
                     gimli::constants::DW_TAG_member => {
                         // TODO: Sometimes this is not a simple number, but a location expression.
@@ -280,19 +279,32 @@ fn find_type(
                             .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
                             .required_udata_value()?;
 
-                        members.push(StructureMember {
+                        let mut member_tree = TypeValueTree::new(TypeValue {
                             name: member_name,
-                            member_type: member_type()?,
-                            member_location,
+                            variable_type: Default::default(),
+                            bit_range: Default::default(),
+                            variable_value: Default::default(),
                         });
+                        member_tree.data().bit_range = member_location..member_location;
+
+                        get_entry_type_reference_tree(unit, abbreviations, member_entry).map(
+                            |mut type_tree| {
+                                type_tree.root().map(|root| {
+                                    build_type_value_tree(
+                                        dwarf,
+                                        unit,
+                                        abbreviations,
+                                        root,
+                                        &mut member_tree,
+                                    )
+                                })
+                            },
+                        )??;
+
+                        type_value_tree.push_back(member_tree);
                     }
-                    gimli::constants::DW_TAG_template_type_parameter => {
-                        type_params.push(TemplateTypeParam {
-                            name: member_name,
-                            template_type: member_type()?,
-                        })
-                    }
-                    gimli::constants::DW_TAG_subprogram => {} // Ignore
+                    gimli::constants::DW_TAG_template_type_parameter => {} // Ignore
+                    gimli::constants::DW_TAG_subprogram => {}              // Ignore
                     gimli::constants::DW_TAG_structure_type
                     | gimli::constants::DW_TAG_union_type
                     | gimli::constants::DW_TAG_class_type => {} // Ignore
@@ -306,27 +318,7 @@ fn find_type(
                 }
             }
 
-            match tag {
-                gimli::constants::DW_TAG_structure_type => Ok(VariableType::Structure {
-                    name: type_name,
-                    type_params,
-                    members,
-                    byte_size,
-                }),
-                gimli::constants::DW_TAG_union_type => Ok(VariableType::Union {
-                    name: type_name,
-                    type_params,
-                    members,
-                    byte_size,
-                }),
-                gimli::constants::DW_TAG_class_type => Ok(VariableType::Class {
-                    name: type_name,
-                    type_params,
-                    members,
-                    byte_size,
-                }),
-                _ => unreachable!(),
-            }
+            Ok(())
         }
         gimli::constants::DW_TAG_base_type => {
             // A base type is a primitive and there are many of them.
@@ -352,21 +344,34 @@ fn find_type(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
-            Ok(VariableType::BaseType {
-                name,
-                encoding,
-                byte_size,
-            })
+            type_value_tree.data_mut().variable_type.name = name;
+            type_value_tree.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
+            type_value_tree.data_mut().bit_range.end =
+                type_value_tree.data_mut().bit_range.start + byte_size * 8;
+
+            Ok(())
         }
         gimli::constants::DW_TAG_pointer_type => {
             // A pointer in this context is just a number.
             // It has a name and a type that indicates the type of the object it points to.
 
-            let pointee_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
+            let mut pointee_type_tree = TypeValueTree::new(TypeValue {
+                name: "pointee".into(),
+                variable_type: Default::default(),
+                bit_range: Default::default(),
+                variable_value: Default::default(),
+            });
+            get_entry_type_reference_tree(unit, abbreviations, entry).map(
                 |mut type_tree| {
-                    type_tree
-                        .root()
-                        .map(|root| find_type(dwarf, unit, abbreviations, root))
+                    type_tree.root().map(|root| {
+                        build_type_value_tree(
+                            dwarf,
+                            unit,
+                            abbreviations,
+                            root,
+                            &mut pointee_type_tree,
+                        )
+                    })
                 },
             )???;
 
@@ -374,7 +379,7 @@ fn find_type(
             // So if only the name is missing, we can recover
 
             let name = get_entry_name(dwarf, unit, entry)
-                .unwrap_or_else(|_| format!("&{}", pointee_type.type_name()));
+                .unwrap_or_else(|_| format!("&{}", pointee_type_tree.data().variable_type.name));
 
             // The debug info also contains an address class that can describe what kind of pointer it is.
             // We only support `DW_ADDR_none` for now, which means that there's no special specification.
@@ -390,10 +395,11 @@ fn find_type(
                 });
             }
 
-            Ok(VariableType::PointerType {
-                name,
-                pointee_type: Box::new(pointee_type),
-            })
+            type_value_tree.data_mut().variable_type.name = name;
+            type_value_tree.data_mut().variable_type.archetype = Archetype::Pointer;
+            type_value_tree.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
+
+            Ok(())
         }
         gimli::constants::DW_TAG_array_type => {
             // Arrays are their own thing in DWARF.
@@ -401,17 +407,30 @@ fn find_type(
             // What can be found on the entry are the type of the elements of the array and the byte size.
             // Arrays have one child entry that contains information about the indexing of the array.
 
-            let array_type = get_entry_type_reference_tree(unit, abbreviations, entry).map(
+            let mut base_element_type_tree = TypeValueTree::new(TypeValue {
+                name: "".into(),
+                variable_type: Default::default(),
+                bit_range: Default::default(),
+                variable_value: Default::default(),
+            });
+            get_entry_type_reference_tree(unit, abbreviations, entry).map(
                 |mut type_tree| {
-                    type_tree
-                        .root()
-                        .map(|root| find_type(dwarf, unit, abbreviations, root))
+                    type_tree.root().map(|root| {
+                        build_type_value_tree(
+                            dwarf,
+                            unit,
+                            abbreviations,
+                            root,
+                            &mut base_element_type_tree,
+                        )
+                    })
                 },
             )???;
 
             let byte_size = entry
                 .attr(gimli::constants::DW_AT_byte_size)?
                 .and_then(|bsize| bsize.udata_value());
+            let element_bitsize = base_element_type_tree.data().bit_range.clone().count() as u64;
 
             let mut children = node.children();
             let child = children
@@ -441,12 +460,28 @@ fn find_type(
                 (Err(e), Err(_)) => Err(e),
             }?;
 
-            Ok(VariableType::ArrayType {
-                array_type: Box::new(array_type),
-                lower_bound,
-                count,
-                byte_size,
-            })
+            type_value_tree.data_mut().bit_range.end = type_value_tree.data_mut().bit_range.start
+                + byte_size.map(|byte_size| byte_size * 8).unwrap_or_else(|| {
+                    element_bitsize * count
+                });
+            type_value_tree.data_mut().variable_type.name = format!(
+                "[{};{}]",
+                base_element_type_tree.data().variable_type.name,
+                count
+            );
+            type_value_tree.data_mut().variable_type.archetype = Archetype::Array;
+
+            for (data_index, element_index) in (lower_bound..(lower_bound + count as i64)).enumerate() {
+                let mut element_type_tree = base_element_type_tree.clone();
+
+                element_type_tree.data_mut().name = element_index.to_string();
+                element_type_tree.data_mut().bit_range.start += element_bitsize;
+                element_type_tree.data_mut().bit_range.end += element_bitsize;
+
+                type_value_tree.push_back(element_type_tree);
+            }
+
+            Ok(())
         }
         gimli::constants::DW_TAG_enumeration_type => {
             // This is an enum type (like a C-style enum).
@@ -458,7 +493,7 @@ fn find_type(
                 .map(|mut type_tree| {
                 type_tree
                     .root()
-                    .map(|root| find_type(dwarf, unit, abbreviations, root))
+                    .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
             })???;
 
             let mut enumerators = Vec::new();
@@ -655,11 +690,9 @@ fn get_piece_data(
 /// Get all of the available variable data based on the [VariableLocationResult] of the [evaluate_location] function.
 fn get_variable_data(
     device_memory: &DeviceMemory<u32>,
-    variable_type: &VariableType,
+    variable_size: u64,
     variable_location: VariableLocationResult,
 ) -> Result<BitVec<u8, Lsb0>, String> {
-    let variable_size = variable_type.byte_size();
-
     match variable_location {
         VariableLocationResult::NoLocationAttribute => Err("Optimized away (always)".into()),
         VariableLocationResult::LocationListNotFound => Err("Optimized away".into()),
@@ -970,7 +1003,7 @@ fn read_variable_entry(
     device_memory: &DeviceMemory<u32>,
     frame_base: Option<u32>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<Option<Variable>, TraceError> {
+) -> Result<Option<Variable<u32>>, TraceError> {
     let mut abstract_origin_tree =
         get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
     let abstract_origin_node = abstract_origin_tree
@@ -996,7 +1029,7 @@ fn read_variable_entry(
     let variable_type =
         get_entry_type_reference_tree(unit, abbreviations, entry).and_then(|mut type_tree| {
             let type_root = type_tree.root()?;
-            find_type(dwarf, unit, abbreviations, type_root)
+            build_type_value_tree(dwarf, unit, abbreviations, type_root)
         });
 
     // Alternatively, get the type from the abstract origin
@@ -1004,7 +1037,7 @@ fn read_variable_entry(
         (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
             .and_then(|mut type_tree| {
                 let type_root = type_tree.root()?;
-                find_type(dwarf, unit, abbreviations, type_root)
+                build_type_value_tree(dwarf, unit, abbreviations, type_root)
             }),
         (variable_type, _) => variable_type,
     };
@@ -1083,14 +1116,14 @@ pub fn find_variables_in_function(
     abbreviations: &Abbreviations,
     device_memory: &DeviceMemory<u32>,
     node: gimli::EntriesTreeNode<DefaultReader>,
-) -> Result<Vec<Variable>, TraceError> {
+) -> Result<Vec<Variable<u32>>, TraceError> {
     fn recursor(
         dwarf: &Dwarf<DefaultReader>,
         unit: &Unit<DefaultReader, usize>,
         abbreviations: &Abbreviations,
         device_memory: &DeviceMemory<u32>,
         node: gimli::EntriesTreeNode<DefaultReader>,
-        variables: &mut Vec<Variable>,
+        variables: &mut Vec<Variable<u32>>,
         mut frame_base: Option<u32>,
     ) -> Result<(), TraceError> {
         let entry = node.entry();
@@ -1146,14 +1179,14 @@ pub fn find_variables_in_function(
 pub fn find_static_variables(
     dwarf: &Dwarf<DefaultReader>,
     device_memory: &DeviceMemory<u32>,
-) -> Result<Vec<Variable>, TraceError> {
+) -> Result<Vec<Variable<u32>>, TraceError> {
     fn recursor(
         dwarf: &Dwarf<DefaultReader>,
         unit: &Unit<DefaultReader, usize>,
         abbreviations: &Abbreviations,
         device_memory: &DeviceMemory<u32>,
         node: gimli::EntriesTreeNode<DefaultReader>,
-        variables: &mut Vec<Variable>,
+        variables: &mut Vec<Variable<u32>>,
     ) -> Result<(), TraceError> {
         let entry = node.entry();
 
@@ -1204,18 +1237,4 @@ pub fn find_static_variables(
     }
 
     Ok(variables)
-}
-
-#[derive(Debug)]
-enum VariableLocationResult {
-    /// The DW_AT_location attribute is missing
-    NoLocationAttribute,
-    /// The location list could not be found in the ELF
-    LocationListNotFound,
-    /// This variable is not present in memory at this point
-    NoLocationFound,
-    /// A required step of the location evaluation logic has not been implemented yet
-    LocationEvaluationStepNotImplemented(EvaluationResult<DefaultReader>),
-    /// The variable is split up into multiple pieces of memory
-    LocationsFound(Vec<Piece<DefaultReader, usize>>),
 }

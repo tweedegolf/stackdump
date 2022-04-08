@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub enum Value<ADDR> {
     Bool(bool),
     Char(char),
@@ -5,6 +6,4 @@ pub enum Value<ADDR> {
     Uint(u128),
     Float(f64),
     Address(ADDR),
-    /// An array of values. All values in the array must have the same type.
-    Array(Vec<Value<ADDR>>),
 }
