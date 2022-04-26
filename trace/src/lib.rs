@@ -123,7 +123,6 @@ pub struct Variable<ADDR> {
     /// The kind of variable (normal, parameter, etc)
     pub kind: VariableKind,
     pub type_value: TypeValueTree<ADDR>,
-    pub data_location: VariableLocationResult,
     /// The code location of where this variable is declared
     pub location: Location,
 }

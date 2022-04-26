@@ -10,6 +10,7 @@ use super::TraceError;
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
+        value::Value,
         variable_type::{Archetype, VariableType},
         TypeValue, TypeValueTree,
     },
@@ -218,11 +219,12 @@ fn build_type_value_tree(
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
-    type_value_tree: &mut TypeValueTree<u32>,
-) -> Result<(), TraceError> {
+) -> Result<TypeValueTree<u32>, TraceError> {
     // Get the root entry and its tag
     let entry = node.entry();
     let entry_tag = entry.tag().to_string();
+
+    let mut type_value_tree = TypeValueTree::new(TypeValue::default());
 
     // The tag tells us what the base type it
     match entry.tag() {
@@ -247,10 +249,9 @@ fn build_type_value_tree(
                 gimli::constants::DW_TAG_class_type => Archetype::Class,
             };
 
-            type_value_tree.data_mut().variable_type.name = type_name;
+            type_value_tree.data_mut().variable_type.name = Some(type_name);
             type_value_tree.data_mut().variable_type.archetype = archetype;
-            type_value_tree.data_mut().bit_range.end =
-                type_value_tree.data_mut().bit_range.start + byte_size * 8;
+            type_value_tree.data_mut().bit_range = 0..byte_size * 8;
 
             // The members of the object can be found by looking at the children of the node
             let mut children = node.children();
@@ -275,31 +276,22 @@ fn build_type_value_tree(
                     gimli::constants::DW_TAG_member => {
                         // TODO: Sometimes this is not a simple number, but a location expression.
                         // As of writing this has not come up, but I can imagine this is the case for C bitfields.
+                        // It is the offset in bytes from the base.
                         let member_location = member_entry
                             .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
                             .required_udata_value()?;
 
-                        let mut member_tree = TypeValueTree::new(TypeValue {
-                            name: member_name,
-                            variable_type: Default::default(),
-                            bit_range: Default::default(),
-                            variable_value: Default::default(),
-                        });
-                        member_tree.data().bit_range = member_location..member_location;
-
-                        get_entry_type_reference_tree(unit, abbreviations, member_entry).map(
-                            |mut type_tree| {
+                        let mut member_tree =
+                            get_entry_type_reference_tree(unit, abbreviations, member_entry)
+                                .map(|mut type_tree| {
                                 type_tree.root().map(|root| {
-                                    build_type_value_tree(
-                                        dwarf,
-                                        unit,
-                                        abbreviations,
-                                        root,
-                                        &mut member_tree,
-                                    )
+                                    build_type_value_tree(dwarf, unit, abbreviations, root)
                                 })
-                            },
-                        )??;
+                            })???;
+
+                        member_tree.data().name = member_name;
+                        member_tree.data().bit_range.start += member_location;
+                        member_tree.data().bit_range.end += member_location;
 
                         type_value_tree.push_back(member_tree);
                     }
@@ -318,7 +310,7 @@ fn build_type_value_tree(
                 }
             }
 
-            Ok(())
+            Ok(type_value_tree)
         }
         gimli::constants::DW_TAG_base_type => {
             // A base type is a primitive and there are many of them.
@@ -344,36 +336,25 @@ fn build_type_value_tree(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
-            type_value_tree.data_mut().variable_type.name = name;
+            type_value_tree.data_mut().variable_type.name = Some(name);
             type_value_tree.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
             type_value_tree.data_mut().bit_range.end =
                 type_value_tree.data_mut().bit_range.start + byte_size * 8;
 
-            Ok(())
+            Ok(type_value_tree)
         }
         gimli::constants::DW_TAG_pointer_type => {
             // A pointer in this context is just a number.
             // It has a name and a type that indicates the type of the object it points to.
 
-            let mut pointee_type_tree = TypeValueTree::new(TypeValue {
-                name: "pointee".into(),
-                variable_type: Default::default(),
-                bit_range: Default::default(),
-                variable_value: Default::default(),
-            });
-            get_entry_type_reference_tree(unit, abbreviations, entry).map(
-                |mut type_tree| {
-                    type_tree.root().map(|root| {
-                        build_type_value_tree(
-                            dwarf,
-                            unit,
-                            abbreviations,
-                            root,
-                            &mut pointee_type_tree,
-                        )
-                    })
-                },
-            )???;
+            let mut pointee_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
+                .map(|mut type_tree| {
+                    type_tree
+                        .root()
+                        .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
+                })???;
+
+            pointee_type_tree.data_mut().name = "pointee".into();
 
             // Some pointers don't have names, but generally it is just `&<typename>`
             // So if only the name is missing, we can recover
@@ -395,11 +376,11 @@ fn build_type_value_tree(
                 });
             }
 
-            type_value_tree.data_mut().variable_type.name = name;
+            type_value_tree.data_mut().variable_type.name = Some(name);
             type_value_tree.data_mut().variable_type.archetype = Archetype::Pointer;
             type_value_tree.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
 
-            Ok(())
+            Ok(type_value_tree)
         }
         gimli::constants::DW_TAG_array_type => {
             // Arrays are their own thing in DWARF.
@@ -407,25 +388,16 @@ fn build_type_value_tree(
             // What can be found on the entry are the type of the elements of the array and the byte size.
             // Arrays have one child entry that contains information about the indexing of the array.
 
-            let mut base_element_type_tree = TypeValueTree::new(TypeValue {
-                name: "".into(),
-                variable_type: Default::default(),
-                bit_range: Default::default(),
-                variable_value: Default::default(),
-            });
-            get_entry_type_reference_tree(unit, abbreviations, entry).map(
-                |mut type_tree| {
-                    type_tree.root().map(|root| {
-                        build_type_value_tree(
-                            dwarf,
-                            unit,
-                            abbreviations,
-                            root,
-                            &mut base_element_type_tree,
-                        )
-                    })
-                },
-            )???;
+            let mut base_element_type_tree =
+                get_entry_type_reference_tree(unit, abbreviations, entry).map(
+                    |mut type_tree| {
+                        type_tree
+                            .root()
+                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
+                    },
+                )???;
+
+            base_element_type_tree.data_mut().name = "base".into();
 
             let byte_size = entry
                 .attr(gimli::constants::DW_AT_byte_size)?
@@ -461,17 +433,19 @@ fn build_type_value_tree(
             }?;
 
             type_value_tree.data_mut().bit_range.end = type_value_tree.data_mut().bit_range.start
-                + byte_size.map(|byte_size| byte_size * 8).unwrap_or_else(|| {
-                    element_bitsize * count
-                });
-            type_value_tree.data_mut().variable_type.name = format!(
+                + byte_size
+                    .map(|byte_size| byte_size * 8)
+                    .unwrap_or_else(|| element_bitsize * count);
+            type_value_tree.data_mut().variable_type.name = Some(format!(
                 "[{};{}]",
                 base_element_type_tree.data().variable_type.name,
                 count
-            );
+            ));
             type_value_tree.data_mut().variable_type.archetype = Archetype::Array;
 
-            for (data_index, element_index) in (lower_bound..(lower_bound + count as i64)).enumerate() {
+            for (data_index, element_index) in
+                (lower_bound..(lower_bound + count as i64)).enumerate()
+            {
                 let mut element_type_tree = base_element_type_tree.clone();
 
                 element_type_tree.data_mut().name = element_index.to_string();
@@ -481,7 +455,7 @@ fn build_type_value_tree(
                 type_value_tree.push_back(element_type_tree);
             }
 
-            Ok(())
+            Ok(type_value_tree)
         }
         gimli::constants::DW_TAG_enumeration_type => {
             // This is an enum type (like a C-style enum).
@@ -489,21 +463,28 @@ fn build_type_value_tree(
             // The entry also has a child `DW_TAG_enumerator` for each variant.
 
             let name = get_entry_name(dwarf, unit, entry)?;
-            let underlying_type = get_entry_type_reference_tree(unit, abbreviations, entry)
-                .map(|mut type_tree| {
-                type_tree
-                    .root()
-                    .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-            })???;
+            let mut underlying_type_tree =
+                get_entry_type_reference_tree(unit, abbreviations, entry).map(
+                    |mut type_tree| {
+                        type_tree
+                            .root()
+                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
+                    },
+                )???;
+            underlying_type_tree.data_mut().name = "base".into();
 
-            let mut enumerators = Vec::new();
+            type_value_tree.data_mut().variable_type.name = Some(name);
+            type_value_tree.data_mut().variable_type.archetype = Archetype::Enumeration;
+            type_value_tree.data_mut().bit_range = underlying_type_tree.data().bit_range;
+
+            type_value_tree.push_back(underlying_type_tree);
 
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
-                // Each child is a DW_TAG_enumerator or DW_TAG_subprogram
                 let enumerator_entry = child.entry();
 
-                if enumerator_entry.tag() == gimli::constants::DW_TAG_subprogram {
+                // Each child is a DW_TAG_enumerator or DW_TAG_subprogram
+                if enumerator_entry.tag() != gimli::constants::DW_TAG_enumerator {
                     continue;
                 }
 
@@ -516,19 +497,23 @@ fn build_type_value_tree(
                     .required_attr(unit, gimli::constants::DW_AT_const_value)?
                     .required_sdata_value()?;
 
-                enumerators.push(Enumerator {
+                type_value_tree.push_back(TypeValueTree::new(TypeValue {
                     name: enumerator_name,
-                    const_value,
-                });
+                    variable_type: VariableType {
+                        name: None,
+                        archetype: Archetype::Enumerator,
+                    },
+                    bit_range: underlying_type_tree.data().bit_range,
+                    variable_value: Some(Value::Int(const_value as i128)),
+                }));
             }
 
-            Ok(VariableType::EnumerationType {
-                name,
-                underlying_type: Box::new(underlying_type),
-                enumerators,
-            })
+            Ok(type_value_tree)
         }
-        gimli::constants::DW_TAG_subroutine_type => Ok(VariableType::Subroutine),
+        gimli::constants::DW_TAG_subroutine_type => {
+            type_value_tree.data_mut().variable_type.archetype = Archetype::Subroutine;
+            Ok(type_value_tree)
+        } // Ignore
         tag => Err(TraceError::TypeNotImplemented {
             type_name: tag.to_string(),
         }),
@@ -688,6 +673,10 @@ fn get_piece_data(
 }
 
 /// Get all of the available variable data based on the [VariableLocationResult] of the [evaluate_location] function.
+///
+/// - `device_memory`: All the captured memory of the device
+/// - `variable_size`: The size of the variable in bits
+/// - `variable_location`: The location of the variable
 fn get_variable_data(
     device_memory: &DeviceMemory<u32>,
     variable_size: u64,
@@ -700,9 +689,13 @@ fn get_variable_data(
         VariableLocationResult::LocationsFound(pieces) => {
             let mut data = BitVec::new();
 
+            // Ceil-div with 8 to get the bytes we need to read
+            let variable_size_bytes =
+                variable_size / 8 + if variable_size % 8 == 0 { 0 } else { 1 };
+
             // Get all the data of the pieces
             for piece in pieces {
-                let piece_data = get_piece_data(device_memory, &piece, variable_size)?;
+                let piece_data = get_piece_data(device_memory, &piece, variable_size_bytes)?;
 
                 if let Some(mut piece_data) = piece_data {
                     // TODO: Is this always in sequential order? We now assume that it is
@@ -722,6 +715,7 @@ fn get_variable_data(
             "A required step of the location evaluation logic has not been implemented yet: {:?}",
             step
         )),
+        VariableLocationResult::ZeroSizedType => Err("ZST"),
     }
 }
 
@@ -1026,14 +1020,14 @@ fn read_variable_entry(
     }
 
     // Get the type of the variable
-    let variable_type =
-        get_entry_type_reference_tree(unit, abbreviations, entry).and_then(|mut type_tree| {
+    let variable_type_value_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
+        .and_then(|mut type_tree| {
             let type_root = type_tree.root()?;
             build_type_value_tree(dwarf, unit, abbreviations, type_root)
         });
 
     // Alternatively, get the type from the abstract origin
-    let variable_type = match (variable_type, abstract_origin_entry) {
+    let variable_type_value_tree = match (variable_type_value_tree, abstract_origin_entry) {
         (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
             .and_then(|mut type_tree| {
                 let type_root = type_tree.root()?;
@@ -1043,7 +1037,7 @@ fn read_variable_entry(
     };
 
     let variable_kind = VariableKind {
-        zero_sized: variable_type
+        zero_sized: variable_type_value_tree
             .as_ref()
             .map(|vt| vt.byte_size() == 0)
             .unwrap_or_default(),
@@ -1059,17 +1053,16 @@ fn read_variable_entry(
         variable_file_location = find_entry_location(dwarf, unit, abstract_origin_entry)?;
     }
 
-    match (variable_name, variable_type) {
-        (Ok(variable_name), Ok(variable_type)) if variable_type.byte_size() == 0 => {
+    match (variable_name, variable_type_value_tree) {
+        (Ok(variable_name), Ok(variable_type_value_tree)) if variable_kind.zero_sized => {
             Ok(Some(Variable {
                 name: variable_name,
                 kind: variable_kind,
-                value: Ok("{ (ZST) }".into()),
-                variable_type,
+                type_value: variable_type_value_tree,
                 location: variable_file_location,
             }))
         }
-        (Ok(variable_name), Ok(variable_type)) => {
+        (Ok(variable_name), Ok(variable_type_value_tree)) => {
             let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
 
             let location_attr = match (location_attr, abstract_origin_entry) {
@@ -1081,17 +1074,20 @@ fn read_variable_entry(
             let variable_location =
                 evaluate_location(dwarf, unit, device_memory, location_attr, frame_base)?;
 
-            let variable_data = get_variable_data(device_memory, &variable_type, variable_location);
+            let variable_data =
+                get_variable_data(device_memory, &variable_type_value_tree, variable_location);
             let variable_value = match variable_data {
-                Ok(variable_data) => render_variable(&variable_type, &variable_data, device_memory),
+                Ok(variable_data) => {
+                    // TODO: Update to use the type_value_tree
+                    render_variable(&variable_type_value_tree, &variable_data, device_memory)
+                }
                 Err(e) => Err(e),
             };
 
             Ok(Some(Variable {
                 name: variable_name,
                 kind: variable_kind,
-                value: variable_value,
-                variable_type,
+                type_value: variable_type_value_tree,
                 location: variable_file_location,
             }))
         }

@@ -2,7 +2,7 @@ use gimli::DwAte;
 
 #[derive(Debug, Clone, Default)]
 pub struct VariableType {
-    pub name: String,
+    pub name: Option<String>,
     pub archetype: Archetype,
 }
 
@@ -16,7 +16,7 @@ pub enum Archetype {
     Array,
     Enumeration,
     Enumerator,
-    TypeParameter,
+    Subroutine,
     Unknown,
 }
 
