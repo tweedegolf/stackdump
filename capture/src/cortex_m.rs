@@ -10,36 +10,38 @@ use stackdump_core::{
 #[cfg(not(has_fpu))]
 pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
+    core_registers: &mut ArrayRegisterData<16, u32>,
     _cs: &bare_metal::CriticalSection,
-) -> ArrayRegisterData<16, u32> {
-    let core_registers = capture_core_registers();
+) {
+    capture_core_registers(core_registers);
     capture_stack(
         core_registers
             .register(stackdump_core::gimli::Arm::SP)
             .unwrap(),
         stack,
     );
-    core_registers
 }
 
 /// Capture the core & fpu registers and the stack
 #[cfg(has_fpu)]
 pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
+    core_registers: &mut ArrayRegisterData<16, u32>,
+    fpu_registers: &mut ArrayRegisterData<32, u32>,
     _cs: &bare_metal::CriticalSection,
-) -> (ArrayRegisterData<16, u32>, ArrayRegisterData<32, u32>) {
-    let core_registers = capture_core_registers();
-    let fpu_registers = capture_fpu_registers();
+) {
+    capture_core_registers(core_registers);
+    capture_fpu_registers(fpu_registers);
     capture_stack(
         core_registers
             .register(stackdump_core::gimli::Arm::SP)
             .unwrap(),
         stack,
     );
-    (core_registers, fpu_registers)
 }
 
-fn capture_core_registers() -> ArrayRegisterData<16, u32> {
+fn capture_core_registers(buffer: &mut ArrayRegisterData<16, u32>) {
+    #[cfg(cortex_m)]
     use core::arch::asm;
 
     // This array is going to hold the register data
@@ -49,6 +51,7 @@ fn capture_core_registers() -> ArrayRegisterData<16, u32> {
         // We've got 16 registers, so make space for that
         register_array.set_len(16);
 
+        #[cfg(cortex_m)]
         asm!(
             "str r0, [{0}, #0]",
             "str r1, [{0}, #4]",
@@ -72,11 +75,12 @@ fn capture_core_registers() -> ArrayRegisterData<16, u32> {
         );
     }
 
-    ArrayRegisterData::new(stackdump_core::gimli::Arm::R0, register_array)
+    *buffer = ArrayRegisterData::new(stackdump_core::gimli::Arm::R0, register_array);
 }
 
 #[cfg(has_fpu)]
-fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
+fn capture_fpu_registers(buffer: &mut ArrayRegisterData<32, u32>) {
+    #[cfg(cortex_m)]
     use core::arch::asm;
 
     // This array is going to hold the register data
@@ -86,6 +90,7 @@ fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
         // We've got 32 registers, so make space for that
         register_array.set_len(32);
 
+        #[cfg(cortex_m)]
         asm!(
             "vstr s0, [{0}, #0]",
             "vstr s1, [{0}, #4]",
@@ -123,7 +128,7 @@ fn capture_fpu_registers() -> ArrayRegisterData<32, u32> {
         );
     }
 
-    ArrayRegisterData::new(stackdump_core::gimli::Arm::S0, register_array)
+    *buffer = ArrayRegisterData::new(stackdump_core::gimli::Arm::S0, register_array)
 }
 
 /// Capture the stack from the current given stack pointer until the start of the stack into the given stack memory region.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## Capture 0.2.0 (03-05-22)
+
+- Changed the function signature of the capture function. It now takes references to existing register data collections instead of returning new ones to improve ergonomics.
+
 ## 0.1.3 (31-03-22)
 
 - Fixed the CLI where it used `show_inlined_variables` instead of `show_zero_sized_variables`

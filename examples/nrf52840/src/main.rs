@@ -7,10 +7,14 @@ use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
 use stackdump_capture::core::memory_region::{ArrayMemoryRegion, MemoryRegion, SliceMemoryRegion};
-use stackdump_capture::core::register_data::RegisterData;
+use stackdump_capture::core::register_data::{ArrayRegisterData, RegisterData};
 
 #[link_section = ".uninit"]
 static mut STACKDUMP: MaybeUninit<ArrayMemoryRegion<4096>> = MaybeUninit::uninit();
+#[link_section = ".uninit"]
+static mut CORE_REGISTERS: MaybeUninit<ArrayRegisterData<16, u32>> = MaybeUninit::uninit();
+#[link_section = ".uninit"]
+static mut FPU_REGISTERS: MaybeUninit<ArrayRegisterData<32, u32>> = MaybeUninit::uninit();
 
 const MESSAGES: [&'static str; 4] = [
     "I love you",
@@ -159,7 +163,9 @@ fn TIMER0() {
     unsafe {
         cortex_m::interrupt::free(|cs| {
             let stack = &mut *STACKDUMP.as_mut_ptr();
-            let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(stack, cs);
+            let core_registers = &mut *CORE_REGISTERS.as_mut_ptr();
+            let fpu_registers = &mut *FPU_REGISTERS.as_mut_ptr();
+            stackdump_capture::cortex_m::capture(stack, core_registers, fpu_registers, cs);
             rprintln!("{:2X?}", core_registers);
             rprintln!("{:2X?}", fpu_registers);
             rprintln!("Stack range: {:#010X?}", stack.address_range());

@@ -30,11 +30,15 @@ This does change the capture return type.
 With fpu:
 
 ```rust
-use stackdump_capture::stackdump_core::memory_region::ArrayMemoryRegion;
+use stackdump_capture::core::memory_region::ArrayMemoryRegion;
+use stackdump_core::register_data::ArrayRegisterData;
 
 let mut stack_capture = ArrayMemoryRegion::default();
-let (core_registers, fpu_registers) = cortex_m::interrupt::free(|cs| {
-    stackdump_capture::cortex_m::capture(&mut stack_capture, &cs)
+let mut core_registers = ArrayRegisterData::default();
+let mut fpu_registers = ArrayRegisterData::default();
+
+cortex_m::interrupt::free(|cs| {
+    stackdump_capture::cortex_m::capture(&mut stack_capture, &mut core_registers, &mut fpu_registers, &cs)
 });
 ```
 
@@ -100,11 +104,8 @@ Now we can capture a everything in e.g. a panic.
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     cortex_m::interrupt::free(|cs| {
         unsafe {
-            let (core_registers, fpu_registers) = stackdump_capture::cortex_m::capture(&mut *STACK_CAPTURE.as_mut_ptr(), &cs);
-            CORE_REGISTERS_CAPTURE.write(core_registers);
-            CORE_REGISTERS_CAPTURE.write(fpu_registers);
-
-            // If you want to capture the heap or the static data, then do that here too
+            stackdump_capture::cortex_m::capture(&mut *STACK_CAPTURE.as_mut_ptr(), &mut *CORE_REGISTERS_CAPTURE.as_mut_ptr(), &mut *FPU_REGISTERS_CAPTURE.as_mut_ptr(), &cs);
+            // If you want to capture the heap or the static data, then do that here too yourself
         }
 
         set_capture_made();
