@@ -2,7 +2,7 @@ use gimli::DwAte;
 
 #[derive(Debug, Clone, Default)]
 pub struct VariableType {
-    pub name: Option<String>,
+    pub name: String,
     pub archetype: Archetype,
 }
 

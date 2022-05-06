@@ -12,7 +12,7 @@ use crate::{
     type_value_tree::{
         value::Value,
         variable_type::{Archetype, VariableType},
-        TypeValue, TypeValueTree,
+        TypeValue, TypeValueTree, VariableDataError,
     },
     DefaultReader, Location, Variable, VariableKind, VariableLocationResult,
 };
@@ -23,6 +23,15 @@ use gimli::{
 };
 use stackdump_core::device_memory::DeviceMemory;
 
+fn div_ceil(lhs: u64, rhs: u64) -> u64 {
+    let d = lhs / rhs;
+    let r = lhs % rhs;
+    if r > 0 && rhs > 0 {
+        d + 1
+    } else {
+        d
+    }
+}
 /// Gets the string value from the `DW_AT_name` attribute of the given entry
 fn get_entry_name(
     dwarf: &Dwarf<DefaultReader>,
@@ -105,11 +114,7 @@ fn try_read_frame_base(
     )?;
     let frame_base_data = get_variable_data(
         device_memory,
-        &VariableType::BaseType {
-            name: String::from("frame_base"),
-            encoding: gimli::constants::DW_ATE_unsigned,
-            byte_size: 4, // Frame base is 4 bytes on cortex-m
-        },
+        4 * 8, // Frame base is 4 bytes on cortex-m (TODO crossplatform)
         frame_base_location,
     );
 
@@ -249,7 +254,7 @@ fn build_type_value_tree(
                 gimli::constants::DW_TAG_class_type => Archetype::Class,
             };
 
-            type_value_tree.data_mut().variable_type.name = Some(type_name);
+            type_value_tree.data_mut().variable_type.name = type_name;
             type_value_tree.data_mut().variable_type.archetype = archetype;
             type_value_tree.data_mut().bit_range = 0..byte_size * 8;
 
@@ -336,7 +341,7 @@ fn build_type_value_tree(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
-            type_value_tree.data_mut().variable_type.name = Some(name);
+            type_value_tree.data_mut().variable_type.name = name;
             type_value_tree.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
             type_value_tree.data_mut().bit_range.end =
                 type_value_tree.data_mut().bit_range.start + byte_size * 8;
@@ -376,7 +381,7 @@ fn build_type_value_tree(
                 });
             }
 
-            type_value_tree.data_mut().variable_type.name = Some(name);
+            type_value_tree.data_mut().variable_type.name = name;
             type_value_tree.data_mut().variable_type.archetype = Archetype::Pointer;
             type_value_tree.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
 
@@ -436,11 +441,11 @@ fn build_type_value_tree(
                 + byte_size
                     .map(|byte_size| byte_size * 8)
                     .unwrap_or_else(|| element_bitsize * count);
-            type_value_tree.data_mut().variable_type.name = Some(format!(
+            type_value_tree.data_mut().variable_type.name = format!(
                 "[{};{}]",
                 base_element_type_tree.data().variable_type.name,
                 count
-            ));
+            );
             type_value_tree.data_mut().variable_type.archetype = Archetype::Array;
 
             for (data_index, element_index) in
@@ -473,7 +478,7 @@ fn build_type_value_tree(
                 )???;
             underlying_type_tree.data_mut().name = "base".into();
 
-            type_value_tree.data_mut().variable_type.name = Some(name);
+            type_value_tree.data_mut().variable_type.name = name;
             type_value_tree.data_mut().variable_type.archetype = Archetype::Enumeration;
             type_value_tree.data_mut().bit_range = underlying_type_tree.data().bit_range;
 
@@ -500,11 +505,11 @@ fn build_type_value_tree(
                 type_value_tree.push_back(TypeValueTree::new(TypeValue {
                     name: enumerator_name,
                     variable_type: VariableType {
-                        name: None,
+                        name: "".into(),
                         archetype: Archetype::Enumerator,
                     },
                     bit_range: underlying_type_tree.data().bit_range,
-                    variable_value: Some(Value::Int(const_value as i128)),
+                    variable_value: Ok(Value::Int(const_value as i128)),
                 }));
             }
 
@@ -596,7 +601,13 @@ fn evaluate_location(
                 // We have no relocations of code
                 result = location_evaluation.resume_with_relocated_address(address)?;
             }
-            r => return Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(r)),
+            r => {
+                return Ok(
+                    VariableLocationResult::LocationEvaluationStepNotImplemented(std::rc::Rc::new(
+                        r,
+                    )),
+                )
+            }
         }
     }
 
@@ -690,8 +701,7 @@ fn get_variable_data(
             let mut data = BitVec::new();
 
             // Ceil-div with 8 to get the bytes we need to read
-            let variable_size_bytes =
-                variable_size / 8 + if variable_size % 8 == 0 { 0 } else { 1 };
+            let variable_size_bytes = div_ceil(variable_size, 8);
 
             // Get all the data of the pieces
             for piece in pieces {
@@ -715,7 +725,44 @@ fn get_variable_data(
             "A required step of the location evaluation logic has not been implemented yet: {:?}",
             step
         )),
-        VariableLocationResult::ZeroSizedType => Err("ZST"),
+    }
+}
+
+fn read_base_type(
+    encoding: gimli::DwAte,
+    data: &BitSlice<u8, Lsb0>,
+) -> Result<Value<u32>, VariableDataError> {
+    match encoding {
+        gimli::constants::DW_ATE_unsigned => match data.len() {
+            8 => Ok(Value::Uint(data.load_le::<u8>() as _)),
+            16 => Ok(Value::Uint(data.load_le::<u16>() as _)),
+            32 => Ok(Value::Uint(data.load_le::<u32>() as _)),
+            64 => Ok(Value::Uint(data.load_le::<u64>() as _)),
+            128 => Ok(Value::Uint(data.load_le::<u128>() as _)),
+            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+        },
+        gimli::constants::DW_ATE_signed => match data.len() {
+            8 => Ok(Value::Int(data.load_le::<u8>() as _)),
+            16 => Ok(Value::Int(data.load_le::<u16>() as _)),
+            32 => Ok(Value::Int(data.load_le::<u32>() as _)),
+            64 => Ok(Value::Int(data.load_le::<u64>() as _)),
+            128 => Ok(Value::Int(data.load_le::<u128>() as _)),
+            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+        },
+        gimli::constants::DW_ATE_float => match data.len() {
+            32 => Ok(Value::Float(f32::from_bits(data.load_le::<u32>()) as _)),
+            64 => Ok(Value::Float(f64::from_bits(data.load_le::<u64>()) as _)),
+            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+        },
+        gimli::constants::DW_ATE_boolean => Ok(Value::Bool(data.iter().any(|v| *v))),
+        gimli::constants::DW_ATE_address => match data.len() {
+            32 => Ok(Value::Address(data.load_le::<u32>() as _)),
+            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+        },
+        t => Err(VariableDataError::UnsupportedBaseType {
+            base_type: t,
+            data: data.to_bitvec(),
+        }),
     }
 }
 
@@ -725,105 +772,83 @@ fn get_variable_data(
 /// If it can not be read, an Err is returned with a user displayable error.
 ///
 /// TODO: using strings is convenient, but not very nice. This should return proper types
-fn render_variable(
-    variable_type: &VariableType,
+fn read_variable_data(
+    variable: &mut TypeValueTree<u32>,
     data: &BitSlice<u8, Lsb0>,
     device_memory: &DeviceMemory<u32>,
-) -> Result<String, String> {
+) {
     // We may not have enough data in some cases
     // I don't know why that is, so let's just print a warning
-    if ((data.len() / 8) as u64) < variable_type.byte_size() {
+    if variable.data().bit_range.end > data.len() as u64 {
         log::warn!(
-            "Variable of type {} has size of {}, but only {} bytes are available",
-            variable_type.type_name(),
-            variable_type.byte_size(),
-            data.len() / 8
+            "Variable of type {} indexes up to the {}th bit, but only {} bits are available",
+            variable.data().variable_type.name,
+            variable.data().bit_range.end,
+            data.len()
         );
     }
 
-    // Sometimes we have more data than we need. So we just need to trim that off
-    let data = &data[..(variable_type.byte_size() as usize * 8).min(data.len())];
-
-    fn read_base_type(
-        encoding: &gimli::DwAte,
-        byte_size: &u64,
-        type_name: &str,
-        data: &BitSlice<u8, Lsb0>,
-    ) -> Result<String, String> {
-        // It's possible to read unit types here
-        if *byte_size == 0 && type_name == "()" {
-            return Ok("()".into());
+    match variable.data().variable_type.archetype {
+        Archetype::Structure | Archetype::Union | Archetype::Class => todo!(),
+        Archetype::BaseType(encoding) => {
+            if variable.data().bit_range.len() == 0 && variable.data().variable_type.name == "()" {
+                variable.data_mut().variable_value = Ok(Value::Unit);
+            } else {
+                variable.data_mut().variable_value =
+                    read_base_type(encoding, &data[variable.data().bit_range]);
+            }
         }
+        Archetype::Pointer => {
+            // The variable is a number that is the address of the pointee.
+            // The pointee is the single child of the tree.
 
-        match *encoding {
-            gimli::constants::DW_ATE_unsigned => match byte_size {
-                1 => Ok(format!("{}", data.load_le::<u8>())),
-                2 => Ok(format!("{}", data.load_le::<u16>())),
-                4 => Ok(format!("{}", data.load_le::<u32>())),
-                8 => Ok(format!("{}", data.load_le::<u64>())),
-                16 => Ok(format!("{}", data.load_le::<u128>())),
-                _ => unreachable!("A byte_size of {} is not possible", byte_size),
-            },
-            gimli::constants::DW_ATE_signed => match byte_size {
-                1 => Ok(format!("{}", data.load_le::<u8>() as i8)),
-                2 => Ok(format!("{}", data.load_le::<u16>() as i16)),
-                4 => Ok(format!("{}", data.load_le::<u32>() as i32)),
-                8 => Ok(format!("{}", data.load_le::<u64>() as i64)),
-                16 => Ok(format!("{}", data.load_le::<u128>() as i128)),
-                _ => unreachable!("A byte_size of {} is not possible", byte_size),
-            },
-            gimli::constants::DW_ATE_float => match byte_size {
-                4 => {
-                    let f = f32::from_bits(data.load_le::<u32>());
-                    // If the float is really big or small, then we want to format it using an exponent
-                    if f.abs() >= 1_000_000_000.0 || f.abs() < (1.0 / 1_000_000_000.0) {
-                        Ok(format!("{:e}", f))
-                    } else {
-                        Ok(format!("{}", f))
+            variable.data_mut().variable_value = read_base_type(
+                gimli::constants::DW_ATE_address,
+                &data[variable.data().bit_range],
+            );
+
+            let address = match variable.data().variable_value {
+                Ok(Value::Address(addr)) => Ok(addr),
+                _ => Err(VariableDataError::InvalidPointerData),
+            };
+
+            let pointee = variable
+                .front_mut()
+                .expect("Pointers must have a pointee child");
+
+            match address {
+                Ok(address) => {
+                    let pointee_data = device_memory.read_slice(
+                        address as u64..address as u64 + div_ceil(pointee.data().bit_range.end, 8),
+                    );
+
+                    match pointee_data {
+                        Some(pointee_data) => {
+                            read_variable_data(pointee, pointee_data.view_bits(), device_memory);
+                        }
+                        None => {
+                            pointee.data_mut().variable_value =
+                                Err(VariableDataError::NoDataAvailable);
+                        }
                     }
                 }
-                8 => {
-                    let f = f64::from_bits(data.load_le::<u64>());
-                    // If the float is really big or small, then we want to format it using an exponent
-                    if f.abs() >= 1_000_000_000.0 || f.abs() < (1.0 / 1_000_000_000.0) {
-                        Ok(format!("{:e}", f))
-                    } else {
-                        Ok(format!("{}", f))
-                    }
-                }
-                _ => unreachable!("A byte_size of {} is not possible", byte_size),
-            },
-            gimli::constants::DW_ATE_boolean => Ok(format!("{}", data.iter().any(|v| *v))),
-            t => Err(format!(
-                "Unimplemented BaseType encoding {} - data: {:X?}",
-                t, data
-            )),
+                Err(e) => pointee.data_mut().variable_value = Err(e),
+            }
         }
+        Archetype::Array => {
+            variable.data_mut().variable_value = Ok(Value::Array);
+            // The tree has all children that we have to read. These are the elements of the array
+            for element in variable.iter_mut() {
+                read_variable_data(element, &data[element.data().bit_range], device_memory);
+            }
+        }
+        Archetype::Enumeration => todo!(),
+        Archetype::Enumerator => todo!(),
+        Archetype::Subroutine => todo!(),
+        Archetype::Unknown => todo!(),
     }
 
     match variable_type {
-        VariableType::BaseType {
-            encoding,
-            byte_size,
-            name,
-        } => read_base_type(encoding, byte_size, name, data),
-        VariableType::ArrayType {
-            array_type, count, ..
-        } => {
-            let element_byte_size = array_type.byte_size() as usize;
-            let element_data_chunks = data.chunks(element_byte_size * 8);
-
-            // We need to gather the value of all of the elements of the array
-            let mut values = Vec::new();
-
-            for chunk in element_data_chunks.take(*count as usize) {
-                values
-                    .push(render_variable(array_type, chunk, device_memory).unwrap_or_else(|e| e));
-            }
-
-            // Join all the values together in the array syntax
-            Ok(format!("[{}]", values.join(", ")))
-        }
         VariableType::PointerType { pointee_type, .. } => {
             // Cortex m, so pointer is little endian u32
             // TODO: This should be made cross platform
@@ -835,7 +860,7 @@ fn render_variable(
 
             // Now render the object that the pointer points at
             let pointee_value = match pointee_memory {
-                Some(data) => render_variable(pointee_type, data.view_bits(), device_memory),
+                Some(data) => read_variable_data(pointee_type, data.view_bits(), device_memory),
                 None => Err(String::from("Not within available memory")),
             };
 
@@ -970,7 +995,7 @@ fn render_variable(
 
                             let member_value = match member_data {
                                 None => Err("Data not available".into()),
-                                Some(member_data) => render_variable(&member.member_type, member_data, device_memory),
+                                Some(member_data) => read_variable_data(&member.member_type, member_data, device_memory),
                             };
 
                             format!(
@@ -1079,7 +1104,7 @@ fn read_variable_entry(
             let variable_value = match variable_data {
                 Ok(variable_data) => {
                     // TODO: Update to use the type_value_tree
-                    render_variable(&variable_type_value_tree, &variable_data, device_memory)
+                    read_variable_data(&variable_type_value_tree, &variable_data, device_memory)
                 }
                 Err(e) => Err(e),
             };
