@@ -1,21 +1,33 @@
 use self::{value::Value, variable_type::VariableType};
-use std::ops::Range;
+use std::{ops::Range, fmt::Debug};
 use thiserror::Error;
 
 pub mod value;
 pub mod variable_type;
+pub mod rendering;
 
+pub type TypeValueNode<ADDR> = trees::Node<TypeValue<ADDR>>;
 pub type TypeValueTree<ADDR> = trees::Tree<TypeValue<ADDR>>;
 
 #[derive(Debug, Clone)]
-pub struct TypeValue<ADDR> {
+pub struct TypeValue<ADDR: AddressType> {
     pub name: String,
     pub variable_type: VariableType,
     pub bit_range: Range<u64>,
     pub variable_value: Result<Value<ADDR>, VariableDataError>,
 }
 
-impl<ADDR> Default for TypeValue<ADDR> {
+impl<ADDR: AddressType> TypeValue<ADDR> {
+    pub fn bit_length(&self) -> u64 {
+        self.bit_range.end - self.bit_range.start
+    }
+
+    pub fn bit_range_usize(&self) -> Range<usize> {
+        self.bit_range.start as usize..self.bit_range.end as usize
+    }
+}
+
+impl<ADDR: AddressType> Default for TypeValue<ADDR> {
     fn default() -> Self {
         Self {
             name: Default::default(),
@@ -39,4 +51,18 @@ pub enum VariableDataError {
     InvalidPointerData,
     #[error("The data of the variable is not available")]
     NoDataAvailable,
+    #[error("The data is not available in device memory: {0}")]
+    NoDataAvailableAt(String),
+    #[error("Optimized away")]
+    OptimizedAway,
+    #[error("A required step of the location evaluation logic has not been implemented yet: {0}")]
+    UnimplementedLocationEvaluationStep(String),
 }
+
+pub trait AddressType: Debug + Copy {}
+
+impl AddressType for u8 {}
+impl AddressType for u16 {}
+impl AddressType for u32 {}
+impl AddressType for u64 {}
+impl AddressType for u128 {}

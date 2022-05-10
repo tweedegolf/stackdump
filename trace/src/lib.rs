@@ -2,8 +2,8 @@
 // #![warn(missing_docs)]
 
 use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
-use std::{fmt::Display, rc::Rc};
-use type_value_tree::TypeValueTree;
+use std::{fmt::{Display, Debug}, rc::Rc};
+use type_value_tree::{TypeValueTree, AddressType};
 
 pub use stackdump_core;
 
@@ -44,7 +44,7 @@ impl Display for Location {
 /// An object containing a de-inlined stack frame.
 /// Exceptions/interrupts are also a frame.
 #[derive(Debug, Clone)]
-pub struct Frame<ADDR> {
+pub struct Frame<ADDR: AddressType> {
     /// The name of the function the frame is in
     pub function: String,
     /// The code location of the frame
@@ -55,7 +55,7 @@ pub struct Frame<ADDR> {
     pub variables: Vec<Variable<ADDR>>,
 }
 
-impl<ADDR> Frame<ADDR> {
+impl<ADDR: AddressType> Frame<ADDR> {
     /// Get a string that can be displayed to a user
     ///
     /// - `show_parameters`: When true, any variable that is a parameter will be shown
@@ -94,7 +94,7 @@ impl<ADDR> Frame<ADDR> {
     }
 }
 
-impl<ADDR> Display for Frame<ADDR> {
+impl<ADDR: AddressType> Display for Frame<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display(true, false, false))
     }
@@ -117,7 +117,7 @@ pub enum FrameType {
 
 /// A variable that was found in the tracing procedure
 #[derive(Debug, Clone)]
-pub struct Variable<ADDR> {
+pub struct Variable<ADDR: AddressType> {
     /// The name of the variable
     pub name: String,
     /// The kind of variable (normal, parameter, etc)
@@ -127,16 +127,16 @@ pub struct Variable<ADDR> {
     pub location: Location,
 }
 
-impl<ADDR> Variable<ADDR> {
-    pub fn render_type(&self) -> String {
-        todo!()
+impl<ADDR: AddressType> Variable<ADDR> {
+    pub fn render_type(&self) -> &str {
+        &self.type_value.root().data().variable_type.name
     }
     pub fn render_value(&self) -> String {
-        todo!()
+        self.type_value.root().data().render_value()
     }
 }
 
-impl<ADDR> Display for Variable<ADDR> {
+impl<ADDR: AddressType> Display for Variable<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut kind_text = self.kind.to_string();
         if !kind_text.is_empty() {
@@ -145,16 +145,16 @@ impl<ADDR> Display for Variable<ADDR> {
 
         let mut location_text = self.location.to_string();
         if !location_text.is_empty() {
-            location_text = format!(" at {}", location_text);
+            location_text = format!("at {}", location_text);
         }
 
         writeln!(
             f,
-            "{}{}: {} ({}){}",
+            "{}{}: {} = {} ({})",
             kind_text,
             self.name,
-            self.render_value(),
             self.render_type(),
+            self.render_value(),
             location_text,
         )
     }

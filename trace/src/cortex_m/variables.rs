@@ -12,7 +12,7 @@ use crate::{
     type_value_tree::{
         value::Value,
         variable_type::{Archetype, VariableType},
-        TypeValue, TypeValueTree, VariableDataError,
+        TypeValue, TypeValueNode, TypeValueTree, VariableDataError,
     },
     DefaultReader, Location, Variable, VariableKind, VariableLocationResult,
 };
@@ -22,6 +22,7 @@ use gimli::{
     EvaluationResult, Piece, Reader, Unit,
 };
 use stackdump_core::device_memory::DeviceMemory;
+use std::pin::Pin;
 
 fn div_ceil(lhs: u64, rhs: u64) -> u64 {
     let d = lhs / rhs;
@@ -230,6 +231,7 @@ fn build_type_value_tree(
     let entry_tag = entry.tag().to_string();
 
     let mut type_value_tree = TypeValueTree::new(TypeValue::default());
+    let mut type_value = type_value_tree.root_mut();
 
     // The tag tells us what the base type it
     match entry.tag() {
@@ -252,11 +254,12 @@ fn build_type_value_tree(
                 gimli::constants::DW_TAG_structure_type => Archetype::Structure,
                 gimli::constants::DW_TAG_union_type => Archetype::Union,
                 gimli::constants::DW_TAG_class_type => Archetype::Class,
+                _ => unreachable!(),
             };
 
-            type_value_tree.data_mut().variable_type.name = type_name;
-            type_value_tree.data_mut().variable_type.archetype = archetype;
-            type_value_tree.data_mut().bit_range = 0..byte_size * 8;
+            type_value.data_mut().variable_type.name = type_name.clone();
+            type_value.data_mut().variable_type.archetype = archetype;
+            type_value.data_mut().bit_range = 0..byte_size * 8;
 
             // The members of the object can be found by looking at the children of the node
             let mut children = node.children();
@@ -294,11 +297,11 @@ fn build_type_value_tree(
                                 })
                             })???;
 
-                        member_tree.data().name = member_name;
-                        member_tree.data().bit_range.start += member_location;
-                        member_tree.data().bit_range.end += member_location;
+                        member_tree.root_mut().data_mut().name = member_name;
+                        member_tree.root_mut().data_mut().bit_range.end += member_location;
+                        member_tree.root_mut().data_mut().bit_range.start += member_location;
 
-                        type_value_tree.push_back(member_tree);
+                        type_value.push_back(member_tree);
                     }
                     gimli::constants::DW_TAG_template_type_parameter => {} // Ignore
                     gimli::constants::DW_TAG_subprogram => {}              // Ignore
@@ -341,10 +344,10 @@ fn build_type_value_tree(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
-            type_value_tree.data_mut().variable_type.name = name;
-            type_value_tree.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
-            type_value_tree.data_mut().bit_range.end =
-                type_value_tree.data_mut().bit_range.start + byte_size * 8;
+            type_value.data_mut().variable_type.name = name;
+            type_value.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
+            type_value.data_mut().bit_range.end =
+                type_value.data_mut().bit_range.start + byte_size * 8;
 
             Ok(type_value_tree)
         }
@@ -359,7 +362,7 @@ fn build_type_value_tree(
                         .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
                 })???;
 
-            pointee_type_tree.data_mut().name = "pointee".into();
+            pointee_type_tree.root_mut().data_mut().name = "pointee".into();
 
             // Some pointers don't have names, but generally it is just `&<typename>`
             // So if only the name is missing, we can recover
@@ -381,9 +384,11 @@ fn build_type_value_tree(
                 });
             }
 
-            type_value_tree.data_mut().variable_type.name = name;
-            type_value_tree.data_mut().variable_type.archetype = Archetype::Pointer;
-            type_value_tree.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
+            type_value.data_mut().variable_type.name = name;
+            type_value.data_mut().variable_type.archetype = Archetype::Pointer;
+            type_value.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
+
+            type_value.push_back(pointee_type_tree);
 
             Ok(type_value_tree)
         }
@@ -402,12 +407,12 @@ fn build_type_value_tree(
                     },
                 )???;
 
-            base_element_type_tree.data_mut().name = "base".into();
+            base_element_type_tree.root_mut().data_mut().name = "base".into();
 
             let byte_size = entry
                 .attr(gimli::constants::DW_AT_byte_size)?
                 .and_then(|bsize| bsize.udata_value());
-            let element_bitsize = base_element_type_tree.data().bit_range.clone().count() as u64;
+            let element_bitsize = base_element_type_tree.data().bit_length();
 
             let mut children = node.children();
             let child = children
@@ -437,27 +442,28 @@ fn build_type_value_tree(
                 (Err(e), Err(_)) => Err(e),
             }?;
 
-            type_value_tree.data_mut().bit_range.end = type_value_tree.data_mut().bit_range.start
+            type_value.data_mut().bit_range.end = type_value.data_mut().bit_range.start
                 + byte_size
                     .map(|byte_size| byte_size * 8)
                     .unwrap_or_else(|| element_bitsize * count);
-            type_value_tree.data_mut().variable_type.name = format!(
+            type_value.data_mut().variable_type.name = format!(
                 "[{};{}]",
                 base_element_type_tree.data().variable_type.name,
                 count
             );
-            type_value_tree.data_mut().variable_type.archetype = Archetype::Array;
+            type_value.data_mut().variable_type.archetype = Archetype::Array;
 
-            for (data_index, element_index) in
-                (lower_bound..(lower_bound + count as i64)).enumerate()
+            for (data_index, element_index) in (lower_bound..(lower_bound + count as i64))
+                .step_by(element_bitsize as usize)
+                .enumerate()
             {
                 let mut element_type_tree = base_element_type_tree.clone();
 
-                element_type_tree.data_mut().name = element_index.to_string();
-                element_type_tree.data_mut().bit_range.start += element_bitsize;
-                element_type_tree.data_mut().bit_range.end += element_bitsize;
+                element_type_tree.root_mut().data_mut().name = element_index.to_string();
+                element_type_tree.root_mut().data_mut().bit_range.start += data_index as u64;
+                element_type_tree.root_mut().data_mut().bit_range.end += data_index as u64;
 
-                type_value_tree.push_back(element_type_tree);
+                type_value.push_back(element_type_tree);
             }
 
             Ok(type_value_tree)
@@ -476,13 +482,14 @@ fn build_type_value_tree(
                             .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
                     },
                 )???;
-            underlying_type_tree.data_mut().name = "base".into();
+            underlying_type_tree.root_mut().data_mut().name = "base".into();
+            let underlying_type_bitrange = underlying_type_tree.root().data().bit_range.clone();
 
-            type_value_tree.data_mut().variable_type.name = name;
-            type_value_tree.data_mut().variable_type.archetype = Archetype::Enumeration;
-            type_value_tree.data_mut().bit_range = underlying_type_tree.data().bit_range;
+            type_value.data_mut().variable_type.name = name;
+            type_value.data_mut().variable_type.archetype = Archetype::Enumeration;
+            type_value.data_mut().bit_range = underlying_type_bitrange.clone();
 
-            type_value_tree.push_back(underlying_type_tree);
+            type_value.push_back(underlying_type_tree);
 
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
@@ -502,13 +509,13 @@ fn build_type_value_tree(
                     .required_attr(unit, gimli::constants::DW_AT_const_value)?
                     .required_sdata_value()?;
 
-                type_value_tree.push_back(TypeValueTree::new(TypeValue {
+                type_value.push_back(TypeValueTree::new(TypeValue {
                     name: enumerator_name,
                     variable_type: VariableType {
                         name: "".into(),
                         archetype: Archetype::Enumerator,
                     },
-                    bit_range: underlying_type_tree.data().bit_range,
+                    bit_range: underlying_type_bitrange.clone(),
                     variable_value: Ok(Value::Int(const_value as i128)),
                 }));
             }
@@ -516,7 +523,7 @@ fn build_type_value_tree(
             Ok(type_value_tree)
         }
         gimli::constants::DW_TAG_subroutine_type => {
-            type_value_tree.data_mut().variable_type.archetype = Archetype::Subroutine;
+            type_value.data_mut().variable_type.archetype = Archetype::Subroutine;
             Ok(type_value_tree)
         } // Ignore
         tag => Err(TraceError::TypeNotImplemented {
@@ -630,14 +637,14 @@ fn get_piece_data(
     device_memory: &DeviceMemory<u32>,
     piece: &Piece<DefaultReader, usize>,
     variable_size: u64,
-) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, String> {
+) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, VariableDataError> {
     let mut data = match piece.location.clone() {
-        gimli::Location::Empty => return Err("Optimized away (Empty location)".into()),
+        gimli::Location::Empty => return Err(VariableDataError::OptimizedAway),
         gimli::Location::Register { register } => Some(
             device_memory
                 .register(register)
                 .map(|r| r.to_ne_bytes().view_bits().to_bitvec())
-                .map_err(|e| e.to_string())?,
+                .map_err(|e| VariableDataError::NoDataAvailableAt(e.to_string()))?,
         ),
         gimli::Location::Address { address } => device_memory
             .read_slice(address..(address + variable_size))
@@ -692,11 +699,11 @@ fn get_variable_data(
     device_memory: &DeviceMemory<u32>,
     variable_size: u64,
     variable_location: VariableLocationResult,
-) -> Result<BitVec<u8, Lsb0>, String> {
+) -> Result<BitVec<u8, Lsb0>, VariableDataError> {
     match variable_location {
-        VariableLocationResult::NoLocationAttribute => Err("Optimized away (always)".into()),
-        VariableLocationResult::LocationListNotFound => Err("Optimized away".into()),
-        VariableLocationResult::NoLocationFound => Err("Optimized away".into()),
+        VariableLocationResult::NoLocationAttribute => Err(VariableDataError::OptimizedAway),
+        VariableLocationResult::LocationListNotFound => Err(VariableDataError::OptimizedAway),
+        VariableLocationResult::NoLocationFound => Err(VariableDataError::OptimizedAway),
         VariableLocationResult::LocationsFound(pieces) => {
             let mut data = BitVec::new();
 
@@ -712,19 +719,18 @@ fn get_variable_data(
                     data.append(&mut piece_data);
                 } else {
                     // Data is not on the stack
-                    return Err(format!(
-                        "Data is not available in device memory: {:X?}",
+                    return Err(VariableDataError::NoDataAvailableAt(format!(
+                        "{:X?}",
                         piece.location
-                    ));
+                    )));
                 };
             }
 
             Ok(data)
         }
-        VariableLocationResult::LocationEvaluationStepNotImplemented(step) => Err(format!(
-            "A required step of the location evaluation logic has not been implemented yet: {:?}",
-            step
-        )),
+        VariableLocationResult::LocationEvaluationStepNotImplemented(step) => Err(
+            VariableDataError::UnimplementedLocationEvaluationStep(format!("{:?}", step)),
+        ),
     }
 }
 
@@ -773,7 +779,7 @@ fn read_base_type(
 ///
 /// TODO: using strings is convenient, but not very nice. This should return proper types
 fn read_variable_data(
-    variable: &mut TypeValueTree<u32>,
+    mut variable: Pin<&mut TypeValueNode<u32>>,
     data: &BitSlice<u8, Lsb0>,
     device_memory: &DeviceMemory<u32>,
 ) {
@@ -789,30 +795,39 @@ fn read_variable_data(
     }
 
     match variable.data().variable_type.archetype {
-        Archetype::Structure | Archetype::Union | Archetype::Class => todo!(),
+        Archetype::Structure | Archetype::Union | Archetype::Class => {
+            // Every member of this object is a child in the tree.
+            // We simply need to read every child.
+            for child in variable.iter_mut() {
+                read_variable_data(child, data, device_memory);
+            }
+        }
         Archetype::BaseType(encoding) => {
-            if variable.data().bit_range.len() == 0 && variable.data().variable_type.name == "()" {
+            if variable.data().bit_length() == 0 && variable.data().variable_type.name == "()" {
                 variable.data_mut().variable_value = Ok(Value::Unit);
             } else {
                 variable.data_mut().variable_value =
-                    read_base_type(encoding, &data[variable.data().bit_range]);
+                    match data.get(variable.data().bit_range_usize()) {
+                        Some(data) => read_base_type(encoding, data),
+                        None => Err(VariableDataError::NoDataAvailable),
+                    };
             }
         }
         Archetype::Pointer => {
             // The variable is a number that is the address of the pointee.
             // The pointee is the single child of the tree.
 
-            variable.data_mut().variable_value = read_base_type(
-                gimli::constants::DW_ATE_address,
-                &data[variable.data().bit_range],
-            );
+            variable.data_mut().variable_value = match data.get(variable.data().bit_range_usize()) {
+                Some(data) => read_base_type(gimli::constants::DW_ATE_address, data),
+                None => Err(VariableDataError::NoDataAvailable),
+            };
 
             let address = match variable.data().variable_value {
                 Ok(Value::Address(addr)) => Ok(addr),
                 _ => Err(VariableDataError::InvalidPointerData),
             };
 
-            let pointee = variable
+            let mut pointee = variable
                 .front_mut()
                 .expect("Pointers must have a pointee child");
 
@@ -838,180 +853,32 @@ fn read_variable_data(
         Archetype::Array => {
             variable.data_mut().variable_value = Ok(Value::Array);
             // The tree has all children that we have to read. These are the elements of the array
-            for element in variable.iter_mut() {
-                read_variable_data(element, &data[element.data().bit_range], device_memory);
-            }
-        }
-        Archetype::Enumeration => todo!(),
-        Archetype::Enumerator => todo!(),
-        Archetype::Subroutine => todo!(),
-        Archetype::Unknown => todo!(),
-    }
-
-    match variable_type {
-        VariableType::PointerType { pointee_type, .. } => {
-            // Cortex m, so pointer is little endian u32
-            // TODO: This should be made cross platform
-            let address = data.load_le::<u32>() as u64;
-            let pointee_size = pointee_type.byte_size() as u64;
-
-            // To render the pointer, we need to dereference it, so read the memory the pointer points to
-            let pointee_memory = device_memory.read_slice(address..(address + pointee_size));
-
-            // Now render the object that the pointer points at
-            let pointee_value = match pointee_memory {
-                Some(data) => read_variable_data(pointee_type, data.view_bits(), device_memory),
-                None => Err(String::from("Not within available memory")),
-            };
-
-            // We want to show everything, so the address, the dereferenced value and the type of the value
-            Ok(format!(
-                "*{:#010X} (= {} ({}))",
-                address,
-                pointee_value.unwrap_or_else(|e| format!("Error({})", e)),
-                pointee_type.type_name(),
-            ))
-        }
-        VariableType::EnumerationType {
-            name,
-            underlying_type,
-            enumerators,
-        } => {
-            // We need to know what the underlying value is of the enum.
-            // With the current structure, the easiest thing to do is to render it and then parse it as an integer
-            // TODO: This should use proper types instead of strings
-            let underlying_value = match underlying_type.deref() {
-                VariableType::BaseType {
-                    encoding,
-                    byte_size,
-                    name,
-                } => read_base_type(encoding, byte_size, name, data),
-                t => Err(format!(
-                    "Enumeration underlying type is not a BaseType: {}",
-                    t.type_name()
-                )),
-            }?;
-
-            let underlying_value: i64 = underlying_value.parse().map_err(|_| {
-                format!(
-                    "Could not parse the underlying type as an integer: {}",
-                    underlying_value
-                )
-            })?;
-
-            // Try to get the variant that is used
-            // This does not work when the enum is used as flags
-            let enumerator = enumerators
-                .iter()
-                .find(|e| e.const_value == underlying_value);
-
-            match enumerator {
-                Some(enumerator) => Ok(format!("{}::{}", name, enumerator.name)),
-                None => Err(format!("{}", underlying_value)),
-            }
-        }
-        VariableType::Structure {
-            name: type_name,
-            members,
-            ..
-        }
-        | VariableType::Class {
-            name: type_name,
-            members,
-            ..
-        }
-        | VariableType::Union {
-            name: type_name,
-            members,
-            ..
-        } => {
-            // If the type is a string, then we want to render it as a string instead of as an array
-            // TODO: This kind of rendering should be placed somewhere else instead of here inline
-            let string_render = if type_name == "&str" {
-                // Let's render the string nicely
-                let pointer = members
-                    .iter()
-                    .find(|m| matches!(m.member_type, VariableType::PointerType { .. }));
-                let length = members.iter().find(|m| {
-                    matches!(
-                        m.member_type,
-                        VariableType::BaseType {
-                            encoding: gimli::constants::DW_ATE_unsigned,
-                            byte_size: 4, // The length is a usize, so 4 bytes on cortex-m
-                            ..
-                        }
-                    )
-                });
-
-                match (pointer, length) {
-                    (Some(pointer), Some(length)) => {
-                        let pointer_address = data[pointer.member_location as usize * 8..][..32]
-                            .load_le::<u32>() as u64;
-                        let length_value = data[length.member_location as usize * 8..][..32]
-                            .load_le::<u32>() as u64;
-                        let string_contents = device_memory
-                            .read_slice(pointer_address..(pointer_address + length_value));
-
-                        Some(match string_contents {
-                            Some(string_contents) => match std::str::from_utf8(string_contents) {
-                                Ok(string) => Ok(format!(
-                                    "*{:#010X}:{} (= \"{}\")",
-                                    pointer_address, length_value, string
-                                )),
-                                Err(e) => Err(format!(
-                                    "Error(string @ *{:#X}:{} contains invalid characters: {})",
-                                    pointer_address, length_value, e
-                                )),
-                            },
-                            None => Err(format!(
-                                "Error(string @ *{:#X}:{} is not within available memory)",
-                                pointer_address, length_value
-                            )),
-                        })
+            for mut element in variable.iter_mut() {
+                match data.get(element.data().bit_range_usize()) {
+                    Some(data) => read_variable_data(element, data, device_memory),
+                    None => {
+                        element.data_mut().variable_value = Err(VariableDataError::NoDataAvailable)
                     }
-                    _ => None,
-                }
-            } else {
-                None
-            };
-
-            match string_render {
-                Some(string_render) => string_render,
-                None => {
-                    log::debug!(
-                        "Creating struct render for {} with {} bytes of data",
-                        type_name,
-                        data.len() / 8
-                    );
-                    let members_string = members
-                        .iter()
-                        .map(|member| {
-                            log::debug!("Creating struct render for structure member: {}", member.name);
-
-                            let member_size = member.member_type.byte_size() as usize;
-                            log::trace!("Getting the data for structure member from location {} bytes with a length of {} bytes", member.member_location, member_size);
-                            let member_data =
-                                data.get(member.member_location as usize * 8..).and_then(|data| data.get(..member_size * 8));
-
-                            let member_value = match member_data {
-                                None => Err("Data not available".into()),
-                                Some(member_data) => read_variable_data(&member.member_type, member_data, device_memory),
-                            };
-
-                            format!(
-                                "{}: {}",
-                                member.name,
-                                member_value.unwrap_or_else(|e| format!("Error({})", e))
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    Ok(format!("{} {{ {} }}", type_name, members_string))
                 }
             }
         }
-        VariableType::Subroutine => Ok("_".into()),
+        Archetype::Enumeration => {
+            // The first child of the enumeration is the base integer. We only have to read that one.
+            read_variable_data(
+                variable.front_mut().expect("Enumerations have a child"),
+                data,
+                device_memory,
+            );
+        }
+        Archetype::Enumerator => {
+            // Ignore, we don't have to do anything
+        }
+        Archetype::Subroutine => {
+            // Ignore, there's nothing to do
+        }
+        Archetype::Unknown => {
+            // Ignore, we don't know what to do
+        }
     }
 }
 
@@ -1064,7 +931,7 @@ fn read_variable_entry(
     let variable_kind = VariableKind {
         zero_sized: variable_type_value_tree
             .as_ref()
-            .map(|vt| vt.byte_size() == 0)
+            .map(|vt| vt.data().bit_length() == 0)
             .unwrap_or_default(),
         inlined: abstract_origin_entry.is_some(),
         parameter: entry.tag() == gimli::constants::DW_TAG_formal_parameter,
@@ -1087,7 +954,7 @@ fn read_variable_entry(
                 location: variable_file_location,
             }))
         }
-        (Ok(variable_name), Ok(variable_type_value_tree)) => {
+        (Ok(variable_name), Ok(mut variable_type_value_tree)) => {
             let location_attr = entry.attr(gimli::constants::DW_AT_location)?;
 
             let location_attr = match (location_attr, abstract_origin_entry) {
@@ -1099,15 +966,27 @@ fn read_variable_entry(
             let variable_location =
                 evaluate_location(dwarf, unit, device_memory, location_attr, frame_base)?;
 
-            let variable_data =
-                get_variable_data(device_memory, &variable_type_value_tree, variable_location);
-            let variable_value = match variable_data {
-                Ok(variable_data) => {
-                    // TODO: Update to use the type_value_tree
-                    read_variable_data(&variable_type_value_tree, &variable_data, device_memory)
+            let variable_data = get_variable_data(
+                device_memory,
+                variable_type_value_tree.data().bit_length(),
+                variable_location,
+            );
+
+            match variable_data {
+                // We have the data so read the variable using it
+                Ok(variable_data) => read_variable_data(
+                    variable_type_value_tree.root_mut(),
+                    &variable_data,
+                    device_memory,
+                ),
+                // We couldn't get the data, so set the value to the error we got
+                Err(e) => {
+                    variable_type_value_tree
+                        .root_mut()
+                        .data_mut()
+                        .variable_value = Err(e)
                 }
-                Err(e) => Err(e),
-            };
+            }
 
             Ok(Some(Variable {
                 name: variable_name,
