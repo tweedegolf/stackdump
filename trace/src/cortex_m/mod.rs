@@ -134,7 +134,7 @@ impl<'data> UnwindingContext<'data> {
 
                 if let Ok(entry_root) = entries.root() {
                     variables = variables::find_variables_in_function(
-                        &self.addr2line_context.dwarf(),
+                        self.addr2line_context.dwarf(),
                         unit,
                         &abbreviations,
                         &self.device_memory,
@@ -508,7 +508,7 @@ pub fn trace(
 
     // Get the static data
     let static_variables = variables::find_static_variables(
-        &context.addr2line_context.dwarf(),
+        context.addr2line_context.dwarf(),
         &context.device_memory,
     )?;
     let static_frame = Frame {

@@ -3,7 +3,7 @@
 
 use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
 use std::{fmt::{Display, Debug}, rc::Rc};
-use type_value_tree::{TypeValueTree, AddressType};
+use type_value_tree::{TypeValueTree, AddressType, rendering::render_type_value_tree};
 
 pub use stackdump_core;
 
@@ -132,7 +132,7 @@ impl<ADDR: AddressType> Variable<ADDR> {
         &self.type_value.root().data().variable_type.name
     }
     pub fn render_value(&self) -> String {
-        self.type_value.root().data().render_value()
+        render_type_value_tree(&self.type_value)
     }
 }
 

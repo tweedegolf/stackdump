@@ -1,5 +1,5 @@
 use self::{value::Value, variable_type::VariableType};
-use std::{ops::Range, fmt::Debug};
+use std::{ops::Range, fmt::{Debug, UpperHex}};
 use thiserror::Error;
 
 pub mod value;
@@ -33,33 +33,36 @@ impl<ADDR: AddressType> Default for TypeValue<ADDR> {
             name: Default::default(),
             variable_type: Default::default(),
             bit_range: Default::default(),
-            variable_value: Err(VariableDataError::NoDataAvailable),
+            variable_value: Err(VariableDataError::Unknown),
         }
     }
 }
 
 #[derive(Error, Debug, Clone)]
 pub enum VariableDataError {
-    #[error("The data of the variable has an invalid size of {bits} bits")]
+    #[error("Data has invalid size of {bits} bits")]
     InvalidSize { bits: usize },
-    #[error("The base type {base_type} is not supported (yet). Data: {data:X?}")]
+    #[error("Unsupported base type {base_type}. Data: {data:X?}")]
     UnsupportedBaseType {
         base_type: gimli::DwAte,
         data: bitvec::prelude::BitVec<u8, bitvec::order::Lsb0>,
     },
-    #[error("The data of the pointer is invalid")]
+    #[error("Pointer data is invalid")]
     InvalidPointerData,
-    #[error("The data of the variable is not available")]
+    #[error("Data not available")]
     NoDataAvailable,
-    #[error("The data is not available in device memory: {0}")]
+    #[error("Data not available: {0}")]
     NoDataAvailableAt(String),
     #[error("Optimized away")]
     OptimizedAway,
-    #[error("A required step of the location evaluation logic has not been implemented yet: {0}")]
+    #[error("Required step of location evaluation logic not implemented: {0}")]
     UnimplementedLocationEvaluationStep(String),
+    #[error("Unknown")]
+    Unknown,
+
 }
 
-pub trait AddressType: Debug + Copy {}
+pub trait AddressType: UpperHex + Debug + Copy + Eq {}
 
 impl AddressType for u8 {}
 impl AddressType for u16 {}

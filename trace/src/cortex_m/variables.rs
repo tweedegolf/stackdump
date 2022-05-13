@@ -10,7 +10,7 @@ use super::TraceError;
 use crate::{
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
-        value::Value,
+        value::{StringFormat, Value},
         variable_type::{Archetype, VariableType},
         TypeValue, TypeValueNode, TypeValueTree, VariableDataError,
     },
@@ -266,6 +266,10 @@ fn build_type_value_tree(
             while let Ok(Some(child)) = children.next() {
                 let member_entry = child.entry();
 
+                if type_name == "TestMode" {
+                    log::error!("{}", member_entry.tag());
+                }
+
                 // Object children can be a couple of things:
                 // - Member fields
                 // - Sub programs (methods)
@@ -284,10 +288,11 @@ fn build_type_value_tree(
                     gimli::constants::DW_TAG_member => {
                         // TODO: Sometimes this is not a simple number, but a location expression.
                         // As of writing this has not come up, but I can imagine this is the case for C bitfields.
-                        // It is the offset in bytes from the base.
-                        let member_location = member_entry
+                        // It is the offset in bits from the base.
+                        let member_location_offset_bits = member_entry
                             .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
-                            .required_udata_value()?;
+                            .required_udata_value()?
+                            * 8;
 
                         let mut member_tree =
                             get_entry_type_reference_tree(unit, abbreviations, member_entry)
@@ -298,8 +303,10 @@ fn build_type_value_tree(
                             })???;
 
                         member_tree.root_mut().data_mut().name = member_name;
-                        member_tree.root_mut().data_mut().bit_range.end += member_location;
-                        member_tree.root_mut().data_mut().bit_range.start += member_location;
+                        member_tree.root_mut().data_mut().bit_range.end +=
+                            member_location_offset_bits;
+                        member_tree.root_mut().data_mut().bit_range.start +=
+                            member_location_offset_bits;
 
                         type_value.push_back(member_tree);
                     }
@@ -453,15 +460,14 @@ fn build_type_value_tree(
             );
             type_value.data_mut().variable_type.archetype = Archetype::Array;
 
-            for (data_index, element_index) in (lower_bound..(lower_bound + count as i64))
-                .step_by(element_bitsize as usize)
-                .enumerate()
-            {
+            for data_index in lower_bound..(lower_bound + count as i64) {
                 let mut element_type_tree = base_element_type_tree.clone();
 
-                element_type_tree.root_mut().data_mut().name = element_index.to_string();
-                element_type_tree.root_mut().data_mut().bit_range.start += data_index as u64;
-                element_type_tree.root_mut().data_mut().bit_range.end += data_index as u64;
+                element_type_tree.root_mut().data_mut().name = data_index.to_string();
+                element_type_tree.root_mut().data_mut().bit_range.start +=
+                    data_index as u64 * element_bitsize;
+                element_type_tree.root_mut().data_mut().bit_range.end +=
+                    data_index as u64 * element_bitsize;
 
                 type_value.push_back(element_type_tree);
             }
@@ -785,9 +791,9 @@ fn read_variable_data(
 ) {
     // We may not have enough data in some cases
     // I don't know why that is, so let's just print a warning
-    if variable.data().bit_range.end > data.len() as u64 {
+    if variable.data().bit_length() > data.len() as u64 {
         log::warn!(
-            "Variable of type {} indexes up to the {}th bit, but only {} bits are available",
+            "Variable of type {} claims to take up {} bits, but only {} bits are available",
             variable.data().variable_type.name,
             variable.data().bit_range.end,
             data.len()
@@ -798,8 +804,48 @@ fn read_variable_data(
         Archetype::Structure | Archetype::Union | Archetype::Class => {
             // Every member of this object is a child in the tree.
             // We simply need to read every child.
+
             for child in variable.iter_mut() {
                 read_variable_data(child, data, device_memory);
+            }
+
+            if &variable.data().variable_type.name == "&str" {
+                // This is a string
+                let pointer = &variable
+                    .iter()
+                    .find(|field| field.data().name == "data_ptr")
+                    .unwrap()
+                    .data()
+                    .variable_value;
+                let length = &variable
+                    .iter()
+                    .find(|field| field.data().name == "length")
+                    .unwrap()
+                    .data()
+                    .variable_value;
+
+                match (pointer, length) {
+                    (Ok(Value::Address(pointer)), Ok(Value::Uint(length))) => {
+                        // We can read the data. This works because the length field denotes the byte size, not the char size
+                        let data = device_memory
+                            .read_slice(*pointer as u64..*pointer as u64 + *length as u64);
+                        if let Some(data) = data {
+                            variable.data_mut().variable_value =
+                                Ok(Value::String(data.to_vec(), StringFormat::Utf8));
+
+                        } else {
+                            // There's something wrong. Fall back to treating the string as an object
+                            variable.data_mut().variable_value = Ok(Value::Object);
+                        }
+                    }
+                    _ => {
+                        // There's something wrong. Fall back to treating the string as an object
+                        variable.data_mut().variable_value = Ok(Value::Object);
+                    }
+                }
+            } else {
+                // This is a normal object
+                variable.data_mut().variable_value = Ok(Value::Object);
             }
         }
         Archetype::BaseType(encoding) => {
@@ -855,7 +901,7 @@ fn read_variable_data(
             // The tree has all children that we have to read. These are the elements of the array
             for mut element in variable.iter_mut() {
                 match data.get(element.data().bit_range_usize()) {
-                    Some(data) => read_variable_data(element, data, device_memory),
+                    Some(_) => read_variable_data(element, data, device_memory),
                     None => {
                         element.data_mut().variable_value = Err(VariableDataError::NoDataAvailable)
                     }
@@ -863,6 +909,8 @@ fn read_variable_data(
             }
         }
         Archetype::Enumeration => {
+            variable.data_mut().variable_value = Ok(Value::Enumeration);
+
             // The first child of the enumeration is the base integer. We only have to read that one.
             read_variable_data(
                 variable.front_mut().expect("Enumerations have a child"),
@@ -1001,11 +1049,11 @@ fn read_variable_entry(
                 variable_name,
                 type_error
             );
-            return Ok(None);
+            Ok(None)
         }
         (Err(name_error), _) => {
             log::debug!("Could not get the name of a variable: {}", name_error);
-            return Ok(None);
+            Ok(None)
         }
     }
 }

@@ -278,7 +278,7 @@ impl<'a> MemoryRegion for SliceMemoryRegion<'a> {
     }
 
     fn bytes(&self) -> MemoryRegionIterator {
-        MemoryRegionIterator::new(self.address_range().start, &self.data)
+        MemoryRegionIterator::new(self.address_range().start, self.data)
     }
 
     /// This function is especially unsafe.

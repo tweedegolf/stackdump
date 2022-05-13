@@ -14,6 +14,7 @@ pub enum Archetype {
     BaseType(DwAte),
     Pointer,
     Array,
+    TaggedUnion,
     Enumeration,
     Enumerator,
     Subroutine,

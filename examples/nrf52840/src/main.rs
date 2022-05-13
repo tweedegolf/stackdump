@@ -21,6 +21,21 @@ const MESSAGES: [&'static str; 4] = [
 
 static mut DUMP_RTT_CHANNEL: Option<UpChannel> = None;
 
+pub enum Speed {
+    Full,
+    Half,
+    None
+}
+
+pub enum TestMode {
+    PrintSelective {
+        with_address: bool,
+        with_value: bool,
+        num_val: u32,
+    },
+    PrintAll(u32),
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let _cp = cortex_m::Peripherals::take().unwrap();
@@ -52,6 +67,22 @@ fn main() -> ! {
     let increment = random_index + 1;
     rprintln!("increment: {:p} - {}", &increment, increment);
 
+    let random_speed = match rng.random_u32() % 3 {
+        0 => Speed::Full,
+        1 => Speed::Half,
+        2 => Speed::None,
+        _ => unreachable!(),
+    };
+
+    let test_mode = match rng.random_u32() % 5 {
+        0 => TestMode::PrintAll(rng.random_u32() % 2000 + 9000),
+        1 => TestMode::PrintSelective { with_address: false, with_value: false, num_val: rng.random_u32() % 2000 + 9000 },
+        2 => TestMode::PrintSelective { with_address: true, with_value: false, num_val: rng.random_u32() % 2000 + 9000 },
+        3 => TestMode::PrintSelective { with_address: false, with_value: true, num_val: rng.random_u32() % 2000 + 9000 },
+        4 => TestMode::PrintSelective { with_address: true, with_value: true, num_val: rng.random_u32() % 2000 + 9000 },
+        _ => unreachable!(),
+    };
+
     unsafe {
         NVIC::unmask(nrf52840_hal::pac::Interrupt::TIMER0);
     }
@@ -60,7 +91,7 @@ fn main() -> ! {
     timer.enable_interrupt();
     timer.start(200000u32);
 
-    let res = do_loop(&increment, true, message);
+    let res = do_loop(&increment, true, message, random_speed, test_mode);
 
     rprintln!("{}", res);
 
@@ -68,7 +99,7 @@ fn main() -> ! {
 }
 
 #[inline(never)]
-fn do_loop(increment: &u32, double_trouble: bool, message: &str) -> f64 {
+fn do_loop(increment: &u32, double_trouble: bool, message: &str, speed: Speed, test_mode: TestMode) -> f64 {
     let mut num = 0;
     let mut nums = [0, 0, 0, 0];
     let mut fnum = 0.0;
@@ -80,14 +111,42 @@ fn do_loop(increment: &u32, double_trouble: bool, message: &str) -> f64 {
             num += increment;
         }
         nums[(num / increment) as usize % nums.len()] += increment;
-        fnum += 0.01;
 
-        if num % 10000u32 == 0 {
-            rprintln!("num: {:p} - {}", &num, num);
-            rprintln!("nums: {:p} - {:?}", &nums, nums);
-            rprintln!("fnum: {:p} - {}", &fnum, fnum);
-            rprintln!("Message: {:p} {:p} - {}", &message, message, message);
+        match speed {
+            Speed::Full => fnum += 0.1,
+            Speed::Half => fnum += 0.05,
+            Speed::None => fnum += 0.0,
         }
+
+        match test_mode {
+            TestMode::PrintSelective { with_address: true, with_value: true, num_val } | TestMode::PrintAll(num_val) => {
+                if num % num_val == 0 || fnum > 100000000000000.0 {
+                    rprintln!("num: {:p} - {}", &num, num);
+                    rprintln!("nums: {:p} - {:?}", &nums, nums);
+                    rprintln!("fnum: {:p} - {}", &fnum, fnum);
+                    rprintln!("Message: {:p} {:p} - {}", &message, message, message);
+                }
+            }
+            TestMode::PrintSelective { with_address: false, with_value: true, num_val } => {
+                if num % num_val == 0 || fnum > 100000000000000.0 {
+                    rprintln!("num: {}", num);
+                    rprintln!("nums: {:?}", nums);
+                    rprintln!("fnum: {}", fnum);
+                    rprintln!("Message: {}", message);
+                }
+            }
+            TestMode::PrintSelective { with_address: true, with_value: false, num_val } => {
+                if num % num_val == 0 || fnum > 100000000000000.0 {
+                    rprintln!("num: {:p}", &num);
+                    rprintln!("nums: {:p}", &nums);
+                    rprintln!("fnum: {:p}", &fnum);
+                    rprintln!("Message: {:p} {:p}", &message, message);
+                }
+            }
+            TestMode::PrintSelective { with_address: false, with_value: false, .. } => {
+            }
+        }
+
 
         if num > u32::MAX - increment {
             break fnum;
