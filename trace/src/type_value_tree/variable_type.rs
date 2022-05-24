@@ -6,7 +6,7 @@ pub struct VariableType {
     pub archetype: Archetype,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Archetype {
     Structure,
     Union,
@@ -15,6 +15,7 @@ pub enum Archetype {
     Pointer,
     Array,
     TaggedUnion,
+    TaggedUnionVariant,
     Enumeration,
     Enumerator,
     Subroutine,

@@ -36,6 +36,11 @@ pub enum TestMode {
     PrintAll(u32),
 }
 
+#[repr(transparent)]
+pub struct TransparentTest {
+    value: u32,
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let _cp = cortex_m::Peripherals::take().unwrap();
@@ -64,8 +69,8 @@ fn main() -> ! {
     let mut rng = nrf52840_hal::Rng::new(dp.RNG);
     let random_index = rng.random_u32() % 4;
     let message = MESSAGES[random_index as usize];
-    let increment = random_index + 1;
-    rprintln!("increment: {:p} - {}", &increment, increment);
+    let increment = TransparentTest { value: random_index + 1 };
+    rprintln!("increment: {:p} - {}", &increment.value, increment.value);
 
     let random_speed = match rng.random_u32() % 3 {
         0 => Speed::Full,
@@ -99,18 +104,18 @@ fn main() -> ! {
 }
 
 #[inline(never)]
-fn do_loop(increment: &u32, double_trouble: bool, message: &str, speed: Speed, test_mode: TestMode) -> f64 {
+fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, speed: Speed, test_mode: TestMode) -> f64 {
     let mut num = 0;
     let mut nums = [0, 0, 0, 0];
     let mut fnum = 0.0;
 
     loop {
         if double_trouble {
-            num += increment * 2;
+            num += increment.value * 2;
         } else {
-            num += increment;
+            num += increment.value;
         }
-        nums[(num / increment) as usize % nums.len()] += increment;
+        nums[(num / increment.value) as usize % nums.len()] += increment.value;
 
         match speed {
             Speed::Full => fnum += 0.1,
@@ -148,7 +153,7 @@ fn do_loop(increment: &u32, double_trouble: bool, message: &str, speed: Speed, t
         }
 
 
-        if num > u32::MAX - increment {
+        if num > u32::MAX - increment.value {
             break fnum;
         }
     }

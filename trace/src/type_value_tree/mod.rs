@@ -38,7 +38,7 @@ impl<ADDR: AddressType> Default for TypeValue<ADDR> {
     }
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq)]
 pub enum VariableDataError {
     #[error("Data has invalid size of {bits} bits")]
     InvalidSize { bits: usize },

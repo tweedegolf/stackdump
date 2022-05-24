@@ -10,6 +10,9 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> S
     };
 
     match type_value_node.data().variable_type.archetype {
+        Archetype::TaggedUnion => {
+            todo!()
+        }
         Archetype::Structure | Archetype::Union | Archetype::Class => {
             render_object(type_value_node)
         }
@@ -17,7 +20,7 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> S
         Archetype::Pointer => render_pointer(type_value_node),
         Archetype::Array => render_array(type_value_node),
         Archetype::Enumeration => render_enumeration(type_value_node),
-        Archetype::Enumerator => unreachable!("Should never appear during rendering directly"),
+        Archetype::Enumerator | Archetype::TaggedUnionVariant => unreachable!("Should never appear during rendering directly"),
         Archetype::Subroutine => "_".into(),
         Archetype::Unknown => "?".into(),
     }
