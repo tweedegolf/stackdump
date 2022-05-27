@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Trace
+
+- Big refactor to make the type decoding and value reading be structured instead of it all being strings
+- Added reading capability for tagged unions (fancy Rust enums)
+
 ## 0.1.2 (09-03-22)
 
 - Static variables are now also traced
