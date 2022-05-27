@@ -104,9 +104,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     line,
                                     terminal_size.cols as usize * args.max_wrapping_lines
                                 ),
-                                format!("... ({} more)", div_ceil(line.chars().count(), terminal_size.cols as usize)
-                                - args.max_wrapping_lines).dimmed()
-                                
+                                format!(
+                                    "... ({} more)",
+                                    div_ceil(line.chars().count(), terminal_size.cols as usize)
+                                        - args.max_wrapping_lines
+                                )
+                                .dimmed()
                             );
                         } else {
                             println!("{}", line);

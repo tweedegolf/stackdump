@@ -984,7 +984,7 @@ fn read_variable_data(
             }
         }
         Archetype::TaggedUnionVariant => {
-            read_variable_data(variable.front_mut().unwrap(), data, device_memory); 
+            read_variable_data(variable.front_mut().unwrap(), data, device_memory);
         }
         Archetype::Structure | Archetype::Union | Archetype::Class => {
             // Every member of this object is a child in the tree.

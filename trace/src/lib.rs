@@ -2,7 +2,7 @@
 // #![warn(missing_docs)]
 
 use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
-use render_colors::dark::{color_variable_name, color_type_name};
+use render_colors::dark::{color_type_name, color_variable_name};
 use std::{
     fmt::{Debug, Display},
     rc::Rc,
@@ -16,8 +16,8 @@ use crate::render_colors::dark::{color_function, color_info, color_url};
 pub mod cortex_m;
 pub mod error;
 mod gimli_extensions;
-pub mod type_value_tree;
 mod render_colors;
+pub mod type_value_tree;
 
 type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 

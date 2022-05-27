@@ -5,6 +5,7 @@ use crate::render_colors::dark::{
 };
 use crate::type_value_tree::VariableDataError;
 use colored::ColoredString;
+use phf::phf_map;
 
 pub fn render_type_value_tree<ADDR: AddressType>(
     type_value_tree: &TypeValueTree<ADDR>,
@@ -71,8 +72,30 @@ fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>)
 }
 
 fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+    // Check if the object is a string
     if let Ok(s @ Value::String(_, _)) = type_value_node.data().variable_value.as_ref() {
         return color_string_value(s);
+    }
+
+    // Check if the object is transparent
+    if let Some(field_name) = TRANSPARENT_TYPES.get(
+        type_value_node
+            .data()
+            .variable_type
+            .name
+            .split('<')
+            .next()
+            .unwrap(),
+    ) {
+        // Now we need to find the field that the object is transparent to.
+        // These types can be updated in the future without warning, so if the field cannot be found, then we're just gonna
+        // render them normally
+
+        for field in type_value_node.iter() {
+            if &field.data().name == field_name {
+                return render_unknown(field);
+            }
+        }
     }
 
     let mut output = String::new();
@@ -158,3 +181,26 @@ fn render_enumeration<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) 
 
     color_numeric_value(base_value)
 }
+
+/// List with the known transparent types
+///
+/// The key is the typename before any generics (so, before the '<' character) and the value is the fieldname
+/// the type is transparent to.
+static TRANSPARENT_TYPES: phf::Map<&'static str, &'static str> = phf_map! {
+    "ManuallyDrop" => "value",
+    "MaybeUninit" => "value",
+    "UnsafeCell" => "value",
+    "Cell" => "value",
+    "AtomicBool" => "v",
+    "AtomicI8" => "v",
+    "AtomicI16" => "v",
+    "AtomicI32" => "v",
+    "AtomicI64" => "v",
+    "AtomicIsize" => "v",
+    "AtomicPtr" => "v",
+    "AtomicU8" => "v",
+    "AtomicU16" => "v",
+    "AtomicU32" => "v",
+    "AtomicU64" => "v",
+    "AtomicUsize" => "v",
+};

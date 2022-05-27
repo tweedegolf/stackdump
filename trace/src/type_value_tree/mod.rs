@@ -1,10 +1,13 @@
 use self::{value::Value, variable_type::VariableType};
-use std::{ops::Range, fmt::{Debug, UpperHex}};
+use std::{
+    fmt::{Debug, UpperHex},
+    ops::Range,
+};
 use thiserror::Error;
 
+pub mod rendering;
 pub mod value;
 pub mod variable_type;
-pub mod rendering;
 
 pub type TypeValueNode<ADDR> = trees::Node<TypeValue<ADDR>>;
 pub type TypeValueTree<ADDR> = trees::Tree<TypeValue<ADDR>>;

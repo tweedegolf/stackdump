@@ -27,7 +27,10 @@ pub enum TraceError {
         value_type_name: &'static str,
     },
     #[error("The tag `{tag_name}` @`{entry_debug_info_offset:#X}` has not been implemented yet")]
-    TagNotImplemented { tag_name: String, entry_debug_info_offset: usize },
+    TagNotImplemented {
+        tag_name: String,
+        entry_debug_info_offset: usize,
+    },
     #[error("The operation `{operation}` has not been implemented yet")]
     OperationNotImplemented { operation: String },
     #[error("A child was expected for {entry_tag}, but it was not there")]

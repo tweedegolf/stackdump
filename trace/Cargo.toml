@@ -19,6 +19,7 @@ thiserror = "1.0.30"
 log = "0.4.14"
 trees = "0.4.2"
 colored = "2.0.0"
+phf = { version = "0.10", features = ["macros"] }
 
 [dev-dependencies]
 simple_logger = "2.1.0"
