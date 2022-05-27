@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use stackdump_trace::stackdump_core::{
     device_memory::DeviceMemory,
     memory_region::{VecMemoryRegion, MEMORY_REGION_IDENTIFIER},
@@ -98,13 +99,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 > terminal_size.cols as usize * args.max_wrapping_lines
                         {
                             println!(
-                                "{}... ({} more)",
+                                "{}{}",
                                 truncate(
                                     line,
                                     terminal_size.cols as usize * args.max_wrapping_lines
                                 ),
-                                div_ceil(line.chars().count(), terminal_size.cols as usize)
-                                    - args.max_wrapping_lines
+                                format!("... ({} more)", div_ceil(line.chars().count(), terminal_size.cols as usize)
+                                - args.max_wrapping_lines).dimmed()
+                                
                             );
                         } else {
                             println!("{}", line);

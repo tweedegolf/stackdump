@@ -2,15 +2,22 @@
 // #![warn(missing_docs)]
 
 use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
-use std::{fmt::{Display, Debug}, rc::Rc};
-use type_value_tree::{TypeValueTree, AddressType, rendering::render_type_value_tree};
+use render_colors::dark::{color_variable_name, color_type_name};
+use std::{
+    fmt::{Debug, Display},
+    rc::Rc,
+};
+use type_value_tree::{rendering::render_type_value_tree, AddressType, TypeValueTree};
 
 pub use stackdump_core;
+
+use crate::render_colors::dark::{color_function, color_info, color_url};
 
 pub mod cortex_m;
 pub mod error;
 mod gimli_extensions;
 pub mod type_value_tree;
+mod render_colors;
 
 type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
@@ -71,11 +78,17 @@ impl<ADDR: AddressType> Frame<ADDR> {
 
         let mut display = String::new();
 
-        writeln!(display, "{} ({:?})", self.function, self.frame_type).unwrap();
+        writeln!(
+            display,
+            "{} ({})",
+            color_function(&self.function),
+            color_info(&self.frame_type)
+        )
+        .unwrap();
 
         let location_text = self.location.to_string();
         if !location_text.is_empty() {
-            writeln!(display, "  at {}", location_text).unwrap();
+            writeln!(display, "  at {}", color_url(location_text)).unwrap();
         }
 
         let filtered_variables = self.variables.iter().filter(|v| {
@@ -115,6 +128,18 @@ pub enum FrameType {
     Static,
 }
 
+impl Display for FrameType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameType::Function => write!(f, "Function"),
+            FrameType::InlineFunction => write!(f, "Inline Function"),
+            FrameType::Exception => write!(f, "Exception"),
+            FrameType::Corrupted(reason) => write!(f, "Corrupted: \"{reason}\""),
+            FrameType::Static => write!(f, "Static"),
+        }
+    }
+}
+
 /// A variable that was found in the tracing procedure
 #[derive(Debug, Clone)]
 pub struct Variable<ADDR: AddressType> {
@@ -127,34 +152,25 @@ pub struct Variable<ADDR: AddressType> {
     pub location: Location,
 }
 
-impl<ADDR: AddressType> Variable<ADDR> {
-    pub fn render_type(&self) -> &str {
-        &self.type_value.root().data().variable_type.name
-    }
-    pub fn render_value(&self) -> String {
-        render_type_value_tree(&self.type_value)
-    }
-}
-
 impl<ADDR: AddressType> Display for Variable<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut kind_text = self.kind.to_string();
         if !kind_text.is_empty() {
-            kind_text = format!("({}) ", kind_text);
+            kind_text = color_info(format!("({}) ", kind_text)).to_string();
         }
 
         let mut location_text = self.location.to_string();
         if !location_text.is_empty() {
-            location_text = format!("at {}", location_text);
+            location_text = format!("at {}", color_url(location_text));
         }
 
         writeln!(
             f,
             "{}{}: {} = {} ({})",
             kind_text,
-            self.name,
-            self.render_type(),
-            self.render_value(),
+            color_variable_name(&self.name),
+            color_type_name(&self.type_value.root().data().variable_type.name),
+            render_type_value_tree(&self.type_value),
             location_text,
         )
     }

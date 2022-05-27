@@ -1,14 +1,22 @@
-use crate::type_value_tree::VariableDataError;
-
 use super::{value::Value, variable_type::Archetype, AddressType, TypeValueNode, TypeValueTree};
+use crate::render_colors::dark::{
+    color_enum_member, color_invalid, color_numeric_value, color_string_value, color_type_name,
+    color_variable_name,
+};
+use crate::type_value_tree::VariableDataError;
+use colored::ColoredString;
 
-pub fn render_type_value_tree<ADDR: AddressType>(type_value_tree: &TypeValueTree<ADDR>) -> String {
+pub fn render_type_value_tree<ADDR: AddressType>(
+    type_value_tree: &TypeValueTree<ADDR>,
+) -> ColoredString {
     render_unknown(type_value_tree.root())
 }
 
-fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     if let Err(e) = &type_value_node.data().variable_value {
-        return format!("{{{e}}}");
+        return format!("{{{}}}", color_invalid(e.to_string()))
+            .as_str()
+            .into();
     };
 
     match type_value_node.data().variable_type.archetype {
@@ -28,12 +36,12 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> S
     }
 }
 
-fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let discriminant = type_value_node.front().unwrap().data();
     assert_eq!(&discriminant.name, "discriminant");
     let discriminant_value = match &discriminant.variable_value {
         Ok(value) => value,
-        Err(e) => return format!("{{{e}}}"),
+        Err(e) => return format!("{{{}}}", color_invalid(e)).as_str().into(),
     };
 
     let active_variant = match type_value_node
@@ -52,18 +60,24 @@ fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>)
 
     match active_variant {
         Some(active_variant) => render_unknown(active_variant.front().unwrap()),
-        None => {
-            format!("{{invalid discriminant: {}}}", discriminant_value)
-        }
+        None => format!(
+            "{{{} {}}}",
+            color_invalid("invalid discriminant:"),
+            color_invalid(discriminant_value)
+        )
+        .as_str()
+        .into(),
     }
 }
 
-fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     if let Ok(s @ Value::String(_, _)) = type_value_node.data().variable_value.as_ref() {
-        return s.to_string();
+        return color_string_value(s);
     }
 
-    let mut output = type_value_node.data().variable_type.name.clone();
+    let mut output = String::new();
+
+    output += &color_type_name(&type_value_node.data().variable_type.name).to_string();
 
     output.push_str(" { ");
 
@@ -71,36 +85,43 @@ fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> St
     output.push_str(
         &type_value_node
             .iter()
-            .map(|field| format!("{}: {}", field.data().name, render_unknown(field)))
+            .map(|field| {
+                format!(
+                    "{}: {}",
+                    color_variable_name(&field.data().name),
+                    render_unknown(field)
+                )
+            })
             .collect::<Vec<_>>()
             .join(", "),
     );
 
     output.push_str(" }");
 
-    output
+    output.as_str().into()
 }
 
-fn render_base_type<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
-    type_value_node
-        .data()
-        .variable_value
-        .as_ref()
-        .unwrap()
-        .to_string()
+fn render_base_type<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+    color_numeric_value(type_value_node.data().variable_value.as_ref().unwrap())
 }
 
-fn render_pointer<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_pointer<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let pointer_address = match type_value_node.data().variable_value.as_ref().unwrap() {
         super::value::Value::Address(addr) => addr,
         _ => unreachable!(),
     };
 
     let pointee = type_value_node.front().unwrap();
-    format!("*{pointer_address:#X} = {}", render_unknown(pointee))
+    format!(
+        "*{} = {}",
+        color_numeric_value(format!("{pointer_address:#X}")),
+        render_unknown(pointee)
+    )
+    .as_str()
+    .into()
 }
 
-fn render_array<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_array<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let mut output = String::new();
 
     output.push('[');
@@ -109,31 +130,31 @@ fn render_array<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> Str
     output.push_str(
         &type_value_node
             .iter()
-            .map(render_unknown)
+            .map(|element| render_unknown(element).to_string())
             .collect::<Vec<_>>()
             .join(", "),
     );
 
     output.push(']');
 
-    output
+    output.as_str().into()
 }
 
-fn render_enumeration<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+fn render_enumeration<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let base_value = match &type_value_node.front().unwrap().data().variable_value {
         Ok(base_value) => base_value,
         Err(e) => {
-            return format!("{{{e}}}");
+            return format!("{{{}}}", color_invalid(e)).as_str().into();
         }
     };
 
     for enumerator in type_value_node.iter().skip(1) {
         if let Ok(enumerator_value) = enumerator.data().variable_value.as_ref() {
             if enumerator_value == base_value {
-                return enumerator.data().name.clone();
+                return color_enum_member(&enumerator.data().name);
             }
         }
     }
 
-    base_value.to_string()
+    color_numeric_value(base_value)
 }

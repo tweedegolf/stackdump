@@ -59,7 +59,6 @@ pub enum VariableDataError {
     UnimplementedLocationEvaluationStep(String),
     #[error("Unknown")]
     Unknown,
-
 }
 
 pub trait AddressType: UpperHex + Debug + Copy + Eq {}

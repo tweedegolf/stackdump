@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+### Cli
+
+- Added colorized output
+
 ### Trace
 
 - Big refactor to make the type decoding and value reading be structured instead of it all being strings
 - Added reading capability for tagged unions (fancy Rust enums)
-
+- Added colorized output
 
 ## Capture 0.2.0 (03-05-22)
 
