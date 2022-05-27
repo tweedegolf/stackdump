@@ -26,6 +26,8 @@ impl<ADDR: AddressType> Display for Value<ADDR> {
             Value::Char(v) => write!(f, "{v}"),
             Value::Int(v) => write!(f, "{v}"),
             Value::Uint(v) => write!(f, "{v}"),
+            Value::Float(v) if *v > 1000000000.0 => write!(f, "{v:e}"),
+            Value::Float(v) if *v <  1.0 / 1000000000.0 => write!(f, "{v:e}"),
             Value::Float(v) => write!(f, "{v}"),
             Value::Address(v) => write!(f, "{v:#X}"),
             Value::String(bytes, StringFormat::Ascii | StringFormat::Utf8) => {

@@ -254,6 +254,7 @@ fn build_type_value_tree(
             // Read the DW_AT_discr. It will have a reference to the DIE that we can read to know which variant is active.
             // This will probably be an integer.
             type_value.data_mut().variable_type.archetype = Archetype::TaggedUnion;
+            type_value.data_mut().variable_value = Ok(Value::Object);
 
             let discriminant_attr = entry.required_attr(unit, gimli::constants::DW_AT_discr)?;
 
@@ -416,7 +417,7 @@ fn build_type_value_tree(
                     if let Ok(tagged_union) = tagged_union.as_mut() {
                         // The tagged union child doesn't have a name or byte size, so we need to give it the name of the object we
                         // we thought we would get
-                        tagged_union.root_mut().data_mut().name = type_name;
+                        tagged_union.root_mut().data_mut().variable_type.name = type_name;
                         tagged_union.root_mut().data_mut().bit_range = 0..byte_size * 8;
                     }
 

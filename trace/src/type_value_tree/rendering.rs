@@ -1,4 +1,6 @@
-use super::{variable_type::Archetype, AddressType, TypeValueNode, TypeValueTree, value::Value};
+use crate::type_value_tree::VariableDataError;
+
+use super::{value::Value, variable_type::Archetype, AddressType, TypeValueNode, TypeValueTree};
 
 pub fn render_type_value_tree<ADDR: AddressType>(type_value_tree: &TypeValueTree<ADDR>) -> String {
     render_unknown(type_value_tree.root())
@@ -10,9 +12,7 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> S
     };
 
     match type_value_node.data().variable_type.archetype {
-        Archetype::TaggedUnion => {
-            todo!()
-        }
+        Archetype::TaggedUnion => render_tagged_union(type_value_node),
         Archetype::Structure | Archetype::Union | Archetype::Class => {
             render_object(type_value_node)
         }
@@ -20,14 +20,46 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> S
         Archetype::Pointer => render_pointer(type_value_node),
         Archetype::Array => render_array(type_value_node),
         Archetype::Enumeration => render_enumeration(type_value_node),
-        Archetype::Enumerator | Archetype::TaggedUnionVariant => unreachable!("Should never appear during rendering directly"),
+        Archetype::Enumerator | Archetype::TaggedUnionVariant => {
+            unreachable!("Should never appear during rendering directly")
+        }
         Archetype::Subroutine => "_".into(),
         Archetype::Unknown => "?".into(),
     }
 }
 
+fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
+    let discriminant = type_value_node.front().unwrap().data();
+    assert_eq!(&discriminant.name, "discriminant");
+    let discriminant_value = match &discriminant.variable_value {
+        Ok(value) => value,
+        Err(e) => return format!("{{{e}}}"),
+    };
+
+    let active_variant = match type_value_node
+        .iter()
+        .skip(1)
+        .find(|variant| variant.data().variable_value.as_ref() == Ok(discriminant_value))
+    {
+        Some(variant) => Some(variant),
+        None => {
+            // Let's look for the default variant
+            type_value_node.iter().skip(1).find(|variant| {
+                variant.data().variable_value == Err(VariableDataError::NoDataAvailable)
+            })
+        }
+    };
+
+    match active_variant {
+        Some(active_variant) => render_unknown(active_variant.front().unwrap()),
+        None => {
+            format!("{{invalid discriminant: {}}}", discriminant_value)
+        }
+    }
+}
+
 fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> String {
-    if let Ok(s @ Value::String (_, _)) = type_value_node.data().variable_value.as_ref() {
+    if let Ok(s @ Value::String(_, _)) = type_value_node.data().variable_value.as_ref() {
         return s.to_string();
     }
 
@@ -92,7 +124,7 @@ fn render_enumeration<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) 
         Ok(base_value) => base_value,
         Err(e) => {
             return format!("{{{e}}}");
-        },
+        }
     };
 
     for enumerator in type_value_node.iter().skip(1) {
