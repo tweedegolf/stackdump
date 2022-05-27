@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Trace
+
+- Big refactor to make the type decoding and value reading be structured instead of it all being strings
+- Added reading capability for tagged unions (fancy Rust enums)
+
+
 ## Capture 0.2.0 (03-05-22)
 
 - Changed the function signature of the capture function. It now takes references to existing register data collections instead of returning new ones to improve ergonomics.
@@ -10,7 +16,6 @@
 
 - Fixed the CLI where it used `show_inlined_variables` instead of `show_zero_sized_variables`
 - Added a couple more tags to ignore when searching for static variables
-
 ## 0.1.2 (09-03-22)
 
 - Static variables are now also traced
