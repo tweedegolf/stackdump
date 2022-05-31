@@ -1114,6 +1114,7 @@ fn read_variable_data(
             // Ignore, we don't have to do anything
         }
         Archetype::Subroutine => {
+            variable.data_mut().variable_value = Ok(Value::Object);
             // Ignore, there's nothing to do
         }
         Archetype::Unknown => {
