@@ -22,9 +22,10 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> C
 
     match type_value_node.data().variable_type.archetype {
         Archetype::TaggedUnion => render_tagged_union(type_value_node),
-        Archetype::Structure | Archetype::Union | Archetype::Class => {
-            render_object(type_value_node)
-        }
+        Archetype::Structure
+        | Archetype::Union
+        | Archetype::Class
+        | Archetype::ObjectMemberPointer => render_object(type_value_node),
         Archetype::BaseType(_) => render_base_type(type_value_node),
         Archetype::Pointer => render_pointer(type_value_node),
         Archetype::Array => render_array(type_value_node),

@@ -12,6 +12,7 @@
 - Added reading capability for tagged unions (fancy Rust enums)
 - Added colorized output
 - Made it so that transparent types can be added to lessen the clutter in the trace
+- Object member pointers (objects with the `DW_AT_containing_type` attribute) are now detected an not displayed by default. This hides all of the vtables.
 
 ## Capture 0.2.0 (03-05-22)
 

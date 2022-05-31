@@ -389,10 +389,16 @@ fn build_type_value_tree(
                 .required_attr(unit, gimli::constants::DW_AT_byte_size)?
                 .required_udata_value()?;
 
-            let archetype = match tag {
-                gimli::constants::DW_TAG_structure_type => Archetype::Structure,
-                gimli::constants::DW_TAG_union_type => Archetype::Union,
-                gimli::constants::DW_TAG_class_type => Archetype::Class,
+            // Check if this is a type that wraps another type
+            let is_member_pointer = entry
+                .attr(gimli::constants::DW_AT_containing_type)?
+                .is_some();
+
+            let archetype = match (tag, is_member_pointer) {
+                (_, true) => Archetype::ObjectMemberPointer,
+                (gimli::constants::DW_TAG_structure_type, _) => Archetype::Structure,
+                (gimli::constants::DW_TAG_union_type, _) => Archetype::Union,
+                (gimli::constants::DW_TAG_class_type, _) => Archetype::Class,
                 _ => unreachable!(),
             };
 
@@ -986,7 +992,10 @@ fn read_variable_data(
         Archetype::TaggedUnionVariant => {
             read_variable_data(variable.front_mut().unwrap(), data, device_memory);
         }
-        Archetype::Structure | Archetype::Union | Archetype::Class => {
+        Archetype::Structure
+        | Archetype::Union
+        | Archetype::Class
+        | Archetype::ObjectMemberPointer => {
             // Every member of this object is a child in the tree.
             // We simply need to read every child.
 

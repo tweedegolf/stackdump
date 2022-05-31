@@ -11,6 +11,9 @@ pub enum Archetype {
     Structure,
     Union,
     Class,
+    /// An object (like a Structure) that is a pointer to another type's members.
+    /// For example: the vtable of an object's Debug impl.
+    ObjectMemberPointer,
     BaseType(DwAte),
     Pointer,
     Array,

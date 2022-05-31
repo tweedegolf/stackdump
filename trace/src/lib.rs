@@ -11,7 +11,10 @@ use type_value_tree::{rendering::render_type_value_tree, AddressType, TypeValueT
 
 pub use stackdump_core;
 
-use crate::render_colors::dark::{color_function, color_info, color_url};
+use crate::{
+    render_colors::dark::{color_function, color_info, color_url},
+    type_value_tree::variable_type::Archetype,
+};
 
 pub mod cortex_m;
 pub mod error;
@@ -95,6 +98,8 @@ impl<ADDR: AddressType> Frame<ADDR> {
             (show_inlined_vars || !v.kind.inlined)
                 && (show_zero_sized_vars || !v.kind.zero_sized)
                 && (show_parameters || !v.kind.parameter)
+                // Hide the vtables
+                && v.type_value.data().variable_type.archetype != Archetype::ObjectMemberPointer
         });
         if filtered_variables.clone().count() > 0 {
             writeln!(display, "  variables:").unwrap();
