@@ -6,8 +6,8 @@ use cortex_m::peripheral::NVIC;
 use embedded_hal::timer::CountDown;
 use nrf52840_hal::pac::interrupt;
 use rtt_target::{rprintln, rtt_init, UpChannel};
-use stackdump_capture::core::memory_region::{ArrayMemoryRegion, MemoryRegion, SliceMemoryRegion};
-use stackdump_capture::core::register_data::{ArrayRegisterData, RegisterData};
+use stackdump_capture::core::memory_region::{ArrayMemoryRegion, SliceMemoryRegion};
+use stackdump_capture::core::register_data::ArrayRegisterData;
 
 #[link_section = ".uninit"]
 static mut STACKDUMP: MaybeUninit<ArrayMemoryRegion<4096>> = MaybeUninit::uninit();
@@ -28,7 +28,7 @@ static mut DUMP_RTT_CHANNEL: Option<UpChannel> = None;
 pub enum Speed {
     Full,
     Half,
-    None
+    None,
 }
 
 pub enum TestMode {
@@ -73,7 +73,9 @@ fn main() -> ! {
     let mut rng = nrf52840_hal::Rng::new(dp.RNG);
     let random_index = rng.random_u32() % 4;
     let message = MESSAGES[random_index as usize];
-    let increment = TransparentTest { value: random_index + 1 };
+    let increment = TransparentTest {
+        value: random_index + 1,
+    };
     rprintln!("increment: {:p} - {}", &increment.value, increment.value);
 
     let random_speed = match rng.random_u32() % 3 {
@@ -85,10 +87,26 @@ fn main() -> ! {
 
     let test_mode = match rng.random_u32() % 5 {
         0 => TestMode::PrintAll(rng.random_u32() % 2000 + 9000),
-        1 => TestMode::PrintSelective { with_address: false, with_value: false, num_val: rng.random_u32() % 2000 + 9000 },
-        2 => TestMode::PrintSelective { with_address: true, with_value: false, num_val: rng.random_u32() % 2000 + 9000 },
-        3 => TestMode::PrintSelective { with_address: false, with_value: true, num_val: rng.random_u32() % 2000 + 9000 },
-        4 => TestMode::PrintSelective { with_address: true, with_value: true, num_val: rng.random_u32() % 2000 + 9000 },
+        1 => TestMode::PrintSelective {
+            with_address: false,
+            with_value: false,
+            num_val: rng.random_u32() % 2000 + 9000,
+        },
+        2 => TestMode::PrintSelective {
+            with_address: true,
+            with_value: false,
+            num_val: rng.random_u32() % 2000 + 9000,
+        },
+        3 => TestMode::PrintSelective {
+            with_address: false,
+            with_value: true,
+            num_val: rng.random_u32() % 2000 + 9000,
+        },
+        4 => TestMode::PrintSelective {
+            with_address: true,
+            with_value: true,
+            num_val: rng.random_u32() % 2000 + 9000,
+        },
         _ => unreachable!(),
     };
 
@@ -108,7 +126,13 @@ fn main() -> ! {
 }
 
 #[inline(never)]
-fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, speed: Speed, test_mode: TestMode) -> f64 {
+fn do_loop(
+    increment: &TransparentTest,
+    double_trouble: bool,
+    message: &str,
+    speed: Speed,
+    test_mode: TestMode,
+) -> f64 {
     let mut num = 0;
     let mut nums = [0, 0, 0, 0];
     let mut fnum = 0.0;
@@ -128,7 +152,12 @@ fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, spe
         }
 
         match test_mode {
-            TestMode::PrintSelective { with_address: true, with_value: true, num_val } | TestMode::PrintAll(num_val) => {
+            TestMode::PrintSelective {
+                with_address: true,
+                with_value: true,
+                num_val,
+            }
+            | TestMode::PrintAll(num_val) => {
                 if num % num_val == 0 || fnum > 100000000000000.0 {
                     rprintln!("num: {:p} - {}", &num, num);
                     rprintln!("nums: {:p} - {:?}", &nums, nums);
@@ -136,7 +165,11 @@ fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, spe
                     rprintln!("Message: {:p} {:p} - {}", &message, message, message);
                 }
             }
-            TestMode::PrintSelective { with_address: false, with_value: true, num_val } => {
+            TestMode::PrintSelective {
+                with_address: false,
+                with_value: true,
+                num_val,
+            } => {
                 if num % num_val == 0 || fnum > 100000000000000.0 {
                     rprintln!("num: {}", num);
                     rprintln!("nums: {:?}", nums);
@@ -144,7 +177,11 @@ fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, spe
                     rprintln!("Message: {}", message);
                 }
             }
-            TestMode::PrintSelective { with_address: true, with_value: false, num_val } => {
+            TestMode::PrintSelective {
+                with_address: true,
+                with_value: false,
+                num_val,
+            } => {
                 if num % num_val == 0 || fnum > 100000000000000.0 {
                     rprintln!("num: {:p}", &num);
                     rprintln!("nums: {:p}", &nums);
@@ -152,10 +189,12 @@ fn do_loop(increment: &TransparentTest, double_trouble: bool, message: &str, spe
                     rprintln!("Message: {:p} {:p}", &message, message);
                 }
             }
-            TestMode::PrintSelective { with_address: false, with_value: false, .. } => {
-            }
+            TestMode::PrintSelective {
+                with_address: false,
+                with_value: false,
+                ..
+            } => {}
         }
-
 
         if num > u32::MAX - increment.value {
             break fnum;
@@ -230,9 +269,6 @@ fn TIMER0() {
             let core_registers = &mut *CORE_REGISTERS.as_mut_ptr();
             let fpu_registers = &mut *FPU_REGISTERS.as_mut_ptr();
             stackdump_capture::cortex_m::capture(stack, core_registers, fpu_registers, cs);
-            rprintln!("{:2X?}", core_registers);
-            rprintln!("{:2X?}", fpu_registers);
-            rprintln!("Stack range: {:#010X?}", stack.address_range());
 
             for byte in core_registers.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);

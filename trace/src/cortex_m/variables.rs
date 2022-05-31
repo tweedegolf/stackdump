@@ -811,7 +811,7 @@ fn get_piece_data(
                 .map_err(|e| VariableDataError::NoDataAvailableAt(e.to_string()))?,
         ),
         gimli::Location::Address { address } => device_memory
-            .read_slice(address..(address + variable_size))
+            .read_slice(address..(address + variable_size))?
             .map(|b| b.view_bits().to_bitvec()),
         gimli::Location::Value { value } => {
             let mut data = BitVec::new();
@@ -1021,9 +1021,9 @@ fn read_variable_data(
                         // We can read the data. This works because the length field denotes the byte size, not the char size
                         let data = device_memory
                             .read_slice(*pointer as u64..*pointer as u64 + *length as u64);
-                        if let Some(data) = data {
+                        if let Ok(Some(data)) = data {
                             variable.data_mut().variable_value =
-                                Ok(Value::String(data.to_vec(), StringFormat::Utf8));
+                                Ok(Value::String(data, StringFormat::Utf8));
                         } else {
                             // There's something wrong. Fall back to treating the string as an object
                             variable.data_mut().variable_value = Ok(Value::Object);
@@ -1076,12 +1076,15 @@ fn read_variable_data(
                     );
 
                     match pointee_data {
-                        Some(pointee_data) => {
+                        Ok(Some(pointee_data)) => {
                             read_variable_data(pointee, pointee_data.view_bits(), device_memory);
                         }
-                        None => {
+                        Ok(None) => {
                             pointee.data_mut().variable_value =
                                 Err(VariableDataError::NoDataAvailable);
+                        }
+                        Err(e) => {
+                            pointee.data_mut().variable_value = Err(e.into());
                         }
                     }
                 }

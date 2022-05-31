@@ -2,6 +2,7 @@
 
 members = [
     "capture",
+    "capture-probe",
     "core",
     "trace",
     "cli",

@@ -1,10 +1,7 @@
 //! Capture functions for the cortex-m platform
 
 use stackdump_core::register_data::RegisterData;
-use stackdump_core::{
-    memory_region::{ArrayMemoryRegion, MemoryRegion},
-    register_data::ArrayRegisterData,
-};
+use stackdump_core::{memory_region::ArrayMemoryRegion, register_data::ArrayRegisterData};
 
 /// Capture the core registers and the stack
 #[cfg(not(has_fpu))]

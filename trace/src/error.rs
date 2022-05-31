@@ -1,6 +1,6 @@
 //! All error types of the crate
 
-use stackdump_core::device_memory::MissingRegisterError;
+use stackdump_core::device_memory::{MemoryReadError, MissingRegisterError};
 use thiserror::Error;
 
 /// The main error type during the tracing procedure
@@ -13,6 +13,8 @@ pub enum TraceError {
     ObjectReadError(#[from] addr2line::object::Error),
     #[error("An IO error occured: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("Some memory could not be read: {0}")]
+    MemoryReadError(#[from] MemoryReadError),
     #[error("Some debug information could not be parsed: {0}")]
     DebugParseError(#[from] gimli::Error),
     #[error("An entry ({entry_tag} (@ .debug_info offset {entry_debug_info_offset:X?})) is missing an expected attribute: {attribute_name}")]

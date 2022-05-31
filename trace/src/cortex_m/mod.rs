@@ -328,7 +328,7 @@ impl<'data> UnwindingContext<'data> {
                 .read_u32(
                     self.device_memory.register(gimli::Arm::SP)? as u64,
                     RunTimeEndian::Little,
-                )
+                )?
                 .is_none()
             {
                 Ok((Some(Frame {
@@ -369,7 +369,7 @@ impl<'data> UnwindingContext<'data> {
                     let addr = (i64::from(cfa) + offset) as u64;
                     let new_value = self
                         .device_memory
-                        .read_u32(addr, RunTimeEndian::Little)
+                        .read_u32(addr, RunTimeEndian::Little)?
                         .ok_or(TraceError::MissingMemory(addr))?;
                     *self.device_memory.register_mut(*reg)? = new_value;
                 }
@@ -401,7 +401,7 @@ impl<'data> UnwindingContext<'data> {
             index: usize,
         ) -> Result<u32, TraceError> {
             device_memory
-                .read_u32(starting_sp as u64 + index as u64 * 4, RunTimeEndian::Little)
+                .read_u32(starting_sp as u64 + index as u64 * 4, RunTimeEndian::Little)?
                 .ok_or(TraceError::MissingMemory(
                     starting_sp as u64 + index as u64 * 4,
                 ))
