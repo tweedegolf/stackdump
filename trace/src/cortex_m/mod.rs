@@ -17,20 +17,20 @@ mod variables;
 
 pub(self) const THUMB_BIT: u32 = 1;
 
-struct UnwindingContext<'data> {
+struct UnwindingContext<'memory, 'data> {
     debug_frame: DebugFrame<EndianSlice<'data, LittleEndian>>,
     reset_vector_address_range: Range<u32>,
     text_address_range: Range<u32>,
     addr2line_context: Context<EndianRcSlice<RunTimeEndian>>,
-    device_memory: DeviceMemory<u32>,
+    device_memory: DeviceMemory<'memory, u32>,
     bases: BaseAddresses,
     unwind_context: UnwindContext<EndianSlice<'data, LittleEndian>>,
 }
 
-impl<'data> UnwindingContext<'data> {
+impl<'memory, 'data> UnwindingContext<'memory, 'data> {
     pub fn create(
         elf: File<'data>,
-        mut device_memory: DeviceMemory<u32>,
+        mut device_memory: DeviceMemory<'memory, u32>,
     ) -> Result<Self, TraceError> {
         let addr2line_context = addr2line::Context::new(&elf)?;
 

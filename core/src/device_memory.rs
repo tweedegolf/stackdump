@@ -38,12 +38,13 @@ impl PartialEq for MemoryReadError {
 }
 
 /// Object containing all memory regions (we have available) of the device
-pub struct DeviceMemory<RB: RegisterBacking> {
-    register_data: Vec<Box<dyn RegisterData<RB>>>,
-    memory_regions: Vec<Box<dyn MemoryRegion>>,
+pub struct DeviceMemory<'memory, RB: RegisterBacking> {
+    // Register data must be mutable for stack unwinding
+    register_data: Vec<Box<dyn RegisterData<RB> + 'memory>>,
+    memory_regions: Vec<Box<dyn MemoryRegion + 'memory>>,
 }
 
-impl<RB: RegisterBacking> DeviceMemory<RB> {
+impl<'memory, RB: RegisterBacking> DeviceMemory<'memory, RB> {
     /// Creates a new instance of the device memory
     pub fn new() -> Self {
         Self {
@@ -53,20 +54,13 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
     }
 
     /// Adds a memory region to the device memory
-    pub fn add_memory_region<M: MemoryRegion + 'static>(&mut self, region: M) {
+    pub fn add_memory_region<M: MemoryRegion + 'memory>(&mut self, region: M) {
         self.memory_regions.push(Box::new(region));
     }
-    /// Adds a memory region to the device memory
-    pub fn add_memory_region_boxed(&mut self, region: Box<dyn MemoryRegion>) {
-        self.memory_regions.push(region);
-    }
+
     /// Adds register data to the device memory
-    pub fn add_register_data<RD: RegisterData<RB> + 'static>(&mut self, data: RD) {
+    pub fn add_register_data<RD: RegisterData<RB> + 'memory>(&mut self, data: RD) {
         self.register_data.push(Box::new(data));
-    }
-    /// Adds register data to the device memory
-    pub fn add_register_data_boxed(&mut self, data: Box<dyn RegisterData<RB>>) {
-        self.register_data.push(data);
     }
 
     /// Returns the slice of memory that can be found at the given address_range.
@@ -138,7 +132,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
     }
 }
 
-impl<RB: RegisterBacking> Default for DeviceMemory<RB> {
+impl<'memory, RB: RegisterBacking> Default for DeviceMemory<'memory, RB> {
     fn default() -> Self {
         Self::new()
     }

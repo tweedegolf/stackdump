@@ -16,7 +16,9 @@ description = "Crate for capturing stack dumps"
 [dependencies]
 clap = { version = "3.1.2", features = ["derive", "color", "suggestions"] }
 stackdump-trace = { version = "0.1.3", path = "../trace" }
+stackdump-capture-probe = { path = "../capture-probe" }
 simple_logger = "2.1.0"
 log = "0.4.14"
 termsize = "0.1"
 colored = "2"
+probe-rs = { git = "https://github.com/diondokter/probe-rs", branch = "cortex-m-fpu" }

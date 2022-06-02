@@ -29,5 +29,31 @@
             "preLaunchTask": "rust: cargo build",
             "console": "integratedTerminal",
         }
+        {
+            "name": "(Windows) Launch with probe",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/stackdump-cli.exe",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "sourceFileMap": {
+                "/rustc/5e1a799842ba6ed4a57e91f7ab9435947482f7d8": "${env:USERPROFILE}/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/src/rust"
+            },
+            "symbolSearchPath": "https://msdl.microsoft.com/download/symbols",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ],
+            "args": [
+                "probe",
+                "./examples/data/nrf52840",
+                "-c",
+                "nrf52840"
+            ],
+            "preLaunchTask": "rust: cargo build",
+            "console": "integratedTerminal",
+        }
     ]
 }
