@@ -4,7 +4,7 @@ use crate::{
     memory_region::MemoryRegion,
     register_data::{RegisterBacking, RegisterData},
 };
-use std::{fmt::Display, ops::Range};
+use std::{error::Error, fmt::Display, ops::Range, rc::Rc};
 
 /// An error to signal that a register is not present
 #[derive(Debug, Clone, Copy)]
@@ -20,15 +20,31 @@ impl Display for MissingRegisterError {
         )
     }
 }
-impl std::error::Error for MissingRegisterError {}
+impl Error for MissingRegisterError {}
 
-/// Object containing all memory regions (we have available) of the device
-pub struct DeviceMemory<RB: RegisterBacking> {
-    register_data: Vec<Box<dyn RegisterData<RB>>>,
-    memory_regions: Vec<Box<dyn MemoryRegion>>,
+/// An error to signal that memory could not be read
+#[derive(Debug, Clone)]
+pub struct MemoryReadError(pub Rc<dyn Error>);
+impl Display for MemoryReadError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Memory read error: {}", self.0)
+    }
+}
+impl Error for MemoryReadError {}
+impl PartialEq for MemoryReadError {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_string() == other.0.to_string()
+    }
 }
 
-impl<RB: RegisterBacking> DeviceMemory<RB> {
+/// Object containing all memory regions (we have available) of the device
+pub struct DeviceMemory<'memory, RB: RegisterBacking> {
+    // Register data must be mutable for stack unwinding
+    register_data: Vec<Box<dyn RegisterData<RB> + 'memory>>,
+    memory_regions: Vec<Box<dyn MemoryRegion + 'memory>>,
+}
+
+impl<'memory, RB: RegisterBacking> DeviceMemory<'memory, RB> {
     /// Creates a new instance of the device memory
     pub fn new() -> Self {
         Self {
@@ -38,42 +54,54 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
     }
 
     /// Adds a memory region to the device memory
-    pub fn add_memory_region<M: MemoryRegion + 'static>(&mut self, region: M) {
+    pub fn add_memory_region<M: MemoryRegion + 'memory>(&mut self, region: M) {
         self.memory_regions.push(Box::new(region));
     }
-    /// Adds a memory region to the device memory
-    pub fn add_memory_region_boxed(&mut self, region: Box<dyn MemoryRegion>) {
-        self.memory_regions.push(region);
-    }
+
     /// Adds register data to the device memory
-    pub fn add_register_data<RD: RegisterData<RB> + 'static>(&mut self, data: RD) {
+    pub fn add_register_data<RD: RegisterData<RB> + 'memory>(&mut self, data: RD) {
         self.register_data.push(Box::new(data));
-    }
-    /// Adds register data to the device memory
-    pub fn add_register_data_boxed(&mut self, data: Box<dyn RegisterData<RB>>) {
-        self.register_data.push(data);
     }
 
     /// Returns the slice of memory that can be found at the given address_range.
     /// If the given address range is not fully within one of the captured regions present in the device memory, then None is returned.
-    pub fn read_slice(&self, address_range: Range<u64>) -> Option<&[u8]> {
-        self.memory_regions
-            .iter()
-            .find_map(|mr| mr.read_slice(address_range.clone()))
+    pub fn read_slice(
+        &self,
+        address_range: Range<u64>,
+    ) -> Result<Option<Vec<u8>>, MemoryReadError> {
+        for mr in self.memory_regions.iter() {
+            if let Some(v) = mr.read(address_range.clone())? {
+                return Ok(Some(v));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Reads a byte from the given address if it is present in one of the captured regions present in the device memory
-    pub fn read_u8(&self, address: u64) -> Option<u8> {
-        self.memory_regions
-            .iter()
-            .find_map(|mr| mr.read_u8(address))
+    pub fn read_u8(&self, address: u64) -> Result<Option<u8>, MemoryReadError> {
+        for mr in self.memory_regions.iter() {
+            if let Some(v) = mr.read_u8(address)? {
+                return Ok(Some(v));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Reads a u32 from the given address if it is present in one of the captured regions present in the device memory
-    pub fn read_u32(&self, address: u64, endianness: gimli::RunTimeEndian) -> Option<u32> {
-        self.memory_regions
-            .iter()
-            .find_map(|mr| mr.read_u32(address, endianness))
+    pub fn read_u32(
+        &self,
+        address: u64,
+        endianness: gimli::RunTimeEndian,
+    ) -> Result<Option<u32>, MemoryReadError> {
+        for mr in self.memory_regions.iter() {
+            if let Some(v) = mr.read_u32(address, endianness)? {
+                return Ok(Some(v));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Try to get the value of the given register. Returns an error if the register is not present in any of the register collections.
@@ -104,7 +132,7 @@ impl<RB: RegisterBacking> DeviceMemory<RB> {
     }
 }
 
-impl<RB: RegisterBacking> Default for DeviceMemory<RB> {
+impl<'memory, RB: RegisterBacking> Default for DeviceMemory<'memory, RB> {
     fn default() -> Self {
         Self::new()
     }

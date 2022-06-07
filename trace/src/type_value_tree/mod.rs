@@ -1,4 +1,5 @@
 use self::{value::Value, variable_type::VariableType};
+use stackdump_core::device_memory::MemoryReadError;
 use std::{
     fmt::{Debug, UpperHex},
     ops::Range,
@@ -52,6 +53,8 @@ pub enum VariableDataError {
     },
     #[error("Pointer data is invalid")]
     InvalidPointerData,
+    #[error("Some memory could not be read: {0}")]
+    MemoryReadError(#[from] MemoryReadError),
     #[error("Data not available")]
     NoDataAvailable,
     #[error("Data not available: {0}")]

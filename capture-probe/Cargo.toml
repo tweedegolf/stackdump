@@ -1,24 +1,18 @@
 [package]
-name = "stackdump-cli"
-version = "0.1.3"
+name = "stackdump-capture-probe"
+version = "0.1.0"
 edition = "2021"
-rust-version = "1.59"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
 repository = "https://github.com/tweedegolf/stackdump"
 readme = "README.md"
 keywords = ["no_std", "stackdump"]
 categories = ["embedded", "no-std"]
-description = "Crate for capturing stack dumps"
+description = "Crate for capturing stack dumps of embedded devices with a debugging probe"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.1.2", features = ["derive", "color", "suggestions"] }
-stackdump-trace = { version = "0.1.3", path = "../trace" }
-stackdump-capture-probe = { path = "../capture-probe" }
-simple_logger = "2.1.0"
-log = "0.4.14"
-termsize = "0.1"
-colored = "2"
 probe-rs = { git = "https://github.com/probe-rs/probe-rs" }
+stackdump-core = { version = "0.1.3", path = "../core", default-features = false }
+

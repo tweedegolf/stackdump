@@ -20,32 +20,6 @@ pub trait RegisterData<RB: RegisterBacking>: Debug {
     /// Try to get a mutable reference to the given register.
     /// Returns None if the register is not present in this collection.
     fn register_mut(&mut self, register: gimli::Register) -> Option<&mut RB>;
-
-    /// Get a byte iterator for this collection.
-    ///
-    /// This iterator can be used to store the collection as bytes or to stream over a network.
-    /// The iterated bytes include the length so that if you use the FromIterator implementation,
-    /// it consumes only the bytes that are part of the collection.
-    /// This means you can chain multiple of these iterators after each other.
-    ///
-    /// ```
-    /// use arrayvec::ArrayVec;
-    /// use stackdump_core::register_data::{ArrayRegisterData, RegisterData};
-    ///
-    /// let regs1 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([1, 2, 3, 4]));
-    /// let regs2 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([5, 6, 7, 8]));
-    ///
-    /// let mut intermediate_buffer = Vec::new();
-    ///
-    /// intermediate_buffer.extend(regs1.bytes());
-    /// intermediate_buffer.extend(regs2.bytes());
-    ///
-    /// let mut intermediate_iter = intermediate_buffer.iter();
-    ///
-    /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
-    /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
-    /// ```
-    fn bytes(&self) -> RegisterDataBytesIterator<RB>;
 }
 
 /// A collection of registers, backed by a stack allocated array.
@@ -72,6 +46,38 @@ impl<const SIZE: usize, RB: RegisterBacking> ArrayRegisterData<SIZE, RB> {
             registers,
         }
     }
+
+    /// Get a byte iterator for this collection.
+    ///
+    /// This iterator can be used to store the collection as bytes or to stream over a network.
+    /// The iterated bytes include the length so that if you use the FromIterator implementation,
+    /// it consumes only the bytes that are part of the collection.
+    /// This means you can chain multiple of these iterators after each other.
+    ///
+    /// ```
+    /// use arrayvec::ArrayVec;
+    /// use stackdump_core::register_data::{ArrayRegisterData, RegisterData};
+    ///
+    /// let regs1 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([1, 2, 3, 4]));
+    /// let regs2 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([5, 6, 7, 8]));
+    ///
+    /// let mut intermediate_buffer = Vec::new();
+    ///
+    /// intermediate_buffer.extend(regs1.bytes());
+    /// intermediate_buffer.extend(regs2.bytes());
+    ///
+    /// let mut intermediate_iter = intermediate_buffer.iter();
+    ///
+    /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
+    /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
+    /// ```
+    pub fn bytes(&self) -> RegisterDataBytesIterator<RB> {
+        RegisterDataBytesIterator {
+            index: 0,
+            starting_register_number: self.starting_register_number,
+            registers: &self.registers,
+        }
+    }
 }
 
 impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterData<SIZE, RB> {
@@ -86,14 +92,6 @@ impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterD
     fn register_mut(&mut self, register: gimli::Register) -> Option<&mut RB> {
         let local_register_index = register.0.checked_sub(self.starting_register_number)?;
         self.registers.get_mut(local_register_index as usize)
-    }
-
-    fn bytes(&self) -> RegisterDataBytesIterator<RB> {
-        RegisterDataBytesIterator {
-            index: 0,
-            starting_register_number: self.starting_register_number,
-            registers: &self.registers,
-        }
     }
 }
 
@@ -173,6 +171,38 @@ impl<RB: RegisterBacking> VecRegisterData<RB> {
             registers,
         }
     }
+
+    /// Get a byte iterator for this collection.
+    ///
+    /// This iterator can be used to store the collection as bytes or to stream over a network.
+    /// The iterated bytes include the length so that if you use the FromIterator implementation,
+    /// it consumes only the bytes that are part of the collection.
+    /// This means you can chain multiple of these iterators after each other.
+    ///
+    /// ```
+    /// use arrayvec::ArrayVec;
+    /// use stackdump_core::register_data::{ArrayRegisterData, RegisterData};
+    ///
+    /// let regs1 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([1, 2, 3, 4]));
+    /// let regs2 = ArrayRegisterData::<4, u32>::new(stackdump_core::gimli::Arm::R0, ArrayVec::from([5, 6, 7, 8]));
+    ///
+    /// let mut intermediate_buffer = Vec::new();
+    ///
+    /// intermediate_buffer.extend(regs1.bytes());
+    /// intermediate_buffer.extend(regs2.bytes());
+    ///
+    /// let mut intermediate_iter = intermediate_buffer.iter();
+    ///
+    /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
+    /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
+    /// ```
+    pub fn bytes(&self) -> RegisterDataBytesIterator<RB> {
+        RegisterDataBytesIterator {
+            index: 0,
+            starting_register_number: self.starting_register_number,
+            registers: &self.registers,
+        }
+    }
 }
 
 #[cfg(feature = "std")]
@@ -188,14 +218,6 @@ impl<RB: RegisterBacking> RegisterData<RB> for VecRegisterData<RB> {
     fn register_mut(&mut self, register: gimli::Register) -> Option<&mut RB> {
         let local_register_index = register.0.checked_sub(self.starting_register_number)?;
         self.registers.get_mut(local_register_index as usize)
-    }
-
-    fn bytes(&self) -> RegisterDataBytesIterator<RB> {
-        RegisterDataBytesIterator {
-            index: 0,
-            starting_register_number: self.starting_register_number,
-            registers: &self.registers,
-        }
     }
 }
 

@@ -5,15 +5,27 @@
 ### Cli
 
 - Added colorized output
+- Added the ability to capture and trace from a running device using probe-rs
+
+### Capture-probe
+
+- Created an adaptor for letting a probe-rs core be used as MemoryRegion
+- Added functions to capture the registers via probe-rs
 
 ### Trace
 
-- Big refactor to make the type decoding and value reading be structured instead of it all being strings
+- *Breaking*: Big refactor to make the type decoding and value reading be structured instead of it all being strings
 - Added reading capability for tagged unions (fancy Rust enums)
 - Added colorized output
 - Made it so that transparent types can be added to lessen the clutter in the trace
 - Object member pointers (objects with the `DW_AT_containing_type` attribute) are now detected an not displayed by default. This hides all of the vtables.
 - Subroutines now display a `_` instead of an `Unknown` error
+
+### Core
+
+- *Breaking*: Simplified the MemoryRegion trait and made it fallible
+- *Breaking*: Simplified the RegisterData trait
+- *Breaking*: DeviceMemory now takes a `'memory` lifetime so that not all data has to be owned
 
 ## Capture 0.2.0 (03-05-22)
 
