@@ -24,7 +24,7 @@ If you want to add a target, then please discuss and create an issue or PR.
 In this case we have a cortex m target with FPU.
 A dump has been made with the two register captures first and then the stack capture.
 
-```rust
+```rust,ignore
 let dump: Vec<u8> = // Get your dump from somewhere
 let elf: Vec<u8> = // Read your elf file
 

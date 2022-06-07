@@ -29,7 +29,7 @@ This does change the capture return type.
 
 With fpu:
 
-```rust
+```rust,ignore
 use stackdump_capture::core::memory_region::ArrayMemoryRegion;
 use stackdump_core::register_data::ArrayRegisterData;
 
@@ -54,7 +54,7 @@ We need to be able to persist all the data across the reboot.
 If you have a filesystem or something similar, you could write it to there.
 But most embedded systems have got some SRAM so we could keep it in uninitialized memory.
 
-```rust
+```rust,ignore
 use core::mem::MaybeUninit;
 use stackdump_core::memory_region::ArrayMemoryRegion;
 use stackdump_core::register_data::ArrayRegisterData;
@@ -70,7 +70,7 @@ static mut FPU_REGISTERS_CAPTURE: MaybeUninit<ArrayRegisterData<32, u32>> = Mayb
 We also need to be able to detect at bootup if a stackdump has been captured.
 The best way is to have an uninitialized integer present that can have a specific value to indicate the dump has been made.
 
-```rust
+```rust,ignore
 use core::mem::MaybeUninit;
 
 #[link_section = ".uninit"]
@@ -99,7 +99,7 @@ fn set_capture_made() {
 
 Now we can capture a everything in e.g. a panic.
 
-```rust
+```rust,ignore
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     cortex_m::interrupt::free(|cs| {
@@ -123,7 +123,7 @@ In our main we can then check if there is a stackdump and send it to the server.
 Actually transporting the data is the responsibility of the user, but the memory regions and register data
 have an iter function so you can iterate over the bytes.
 
-```rust
+```rust,ignore
 fn main() {
     let server = (); // User defined
 
