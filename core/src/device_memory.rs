@@ -33,7 +33,7 @@ impl Display for MemoryReadError {
 impl Error for MemoryReadError {}
 impl PartialEq for MemoryReadError {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+        self.0.to_string() == other.0.to_string()
     }
 }
 
