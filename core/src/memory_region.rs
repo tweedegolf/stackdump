@@ -354,7 +354,7 @@ impl<'a> SliceMemoryRegion<'a> {
     ///
     /// The entire block of memory from `data_ptr .. data_ptr + data_len` must be readable.
     /// (A memcpy must be possible with the pointer as source)
-    /// 
+    ///
     /// You must not have another reference to this block of memory or any object that resides in this memory
     /// during the entire lifetime of the object
     pub unsafe fn copy_from_memory(&mut self, data_ptr: *const u8, data_len: usize) {
