@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        rust:
+          - stable
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - name: Install C libraries for tooling
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install libudev-dev libusb-1.0-0-dev
+
+      - run: cargo build
+      - run: cargo test
+
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: clippy, rustfmt
+      - name: Install C libraries for tooling
+        run: sudo apt-get update && sudo apt-get install libudev-dev libusb-1.0-0-dev
+
+      - run: cargo fmt -- --check
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
