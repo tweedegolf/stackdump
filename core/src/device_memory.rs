@@ -1,9 +1,6 @@
 //! Module containing the definitions for device memory, a summation of all available memory that was captured
 
-use crate::{
-    memory_region::MemoryRegion,
-    register_data::{RegisterBacking, RegisterData},
-};
+use crate::{memory_region::MemoryRegion, register_data::RegisterData};
 use std::{error::Error, fmt::Display, ops::Range, rc::Rc};
 
 /// An error to signal that a register is not present
@@ -38,13 +35,13 @@ impl PartialEq for MemoryReadError {
 }
 
 /// Object containing all memory regions (we have available) of the device
-pub struct DeviceMemory<'memory, RB: RegisterBacking> {
+pub struct DeviceMemory<'memory, RB: funty::Integral> {
     // Register data must be mutable for stack unwinding
     register_data: Vec<Box<dyn RegisterData<RB> + 'memory>>,
     memory_regions: Vec<Box<dyn MemoryRegion + 'memory>>,
 }
 
-impl<'memory, RB: RegisterBacking> DeviceMemory<'memory, RB> {
+impl<'memory, RB: funty::Integral> DeviceMemory<'memory, RB> {
     /// Creates a new instance of the device memory
     pub fn new() -> Self {
         Self {
@@ -132,7 +129,7 @@ impl<'memory, RB: RegisterBacking> DeviceMemory<'memory, RB> {
     }
 }
 
-impl<'memory, RB: RegisterBacking> Default for DeviceMemory<'memory, RB> {
+impl<'memory, RB: funty::Integral> Default for DeviceMemory<'memory, RB> {
     fn default() -> Self {
         Self::new()
     }

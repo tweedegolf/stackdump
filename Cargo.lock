@@ -825,6 +825,7 @@ name = "stackdump-core"
 version = "0.1.3"
 dependencies = [
  "arrayvec",
+ "funty",
  "gimli",
  "serde",
 ]
@@ -836,6 +837,7 @@ dependencies = [
  "addr2line",
  "bitvec",
  "colored",
+ "funty",
  "gimli",
  "log",
  "phf",

@@ -1,4 +1,4 @@
-use super::{value::Value, variable_type::Archetype, AddressType, TypeValueNode, TypeValueTree};
+use super::{value::Value, variable_type::Archetype, TypeValueNode, TypeValueTree};
 use crate::render_colors::dark::{
     color_enum_member, color_invalid, color_numeric_value, color_string_value, color_type_name,
     color_variable_name,
@@ -7,13 +7,13 @@ use crate::type_value_tree::VariableDataError;
 use colored::ColoredString;
 use phf::phf_map;
 
-pub fn render_type_value_tree<ADDR: AddressType>(
+pub fn render_type_value_tree<ADDR: funty::Integral>(
     type_value_tree: &TypeValueTree<ADDR>,
 ) -> ColoredString {
     render_unknown(type_value_tree.root())
 }
 
-fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_unknown<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     if let Err(e) = &type_value_node.data().variable_value {
         return format!("{{{}}}", color_invalid(e.to_string()))
             .as_str()
@@ -38,7 +38,9 @@ fn render_unknown<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> C
     }
 }
 
-fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_tagged_union<ADDR: funty::Integral>(
+    type_value_node: &TypeValueNode<ADDR>,
+) -> ColoredString {
     let discriminant = type_value_node.front().unwrap().data();
     assert_eq!(&discriminant.name, "discriminant");
     let discriminant_value = match &discriminant.variable_value {
@@ -72,7 +74,7 @@ fn render_tagged_union<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>)
     }
 }
 
-fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_object<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     // Check if the object is a string
     if let Ok(s @ Value::String(_, _)) = type_value_node.data().variable_value.as_ref() {
         return color_string_value(s);
@@ -125,11 +127,11 @@ fn render_object<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> Co
     output.as_str().into()
 }
 
-fn render_base_type<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_base_type<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     color_numeric_value(type_value_node.data().variable_value.as_ref().unwrap())
 }
 
-fn render_pointer<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_pointer<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let pointer_address = match type_value_node.data().variable_value.as_ref().unwrap() {
         super::value::Value::Address(addr) => addr,
         _ => unreachable!(),
@@ -145,7 +147,7 @@ fn render_pointer<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> C
     .into()
 }
 
-fn render_array<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_array<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
     let mut output = String::new();
 
     output.push('[');
@@ -164,7 +166,9 @@ fn render_array<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> Col
     output.as_str().into()
 }
 
-fn render_enumeration<ADDR: AddressType>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+fn render_enumeration<ADDR: funty::Integral>(
+    type_value_node: &TypeValueNode<ADDR>,
+) -> ColoredString {
     let base_value = match &type_value_node.front().unwrap().data().variable_value {
         Ok(base_value) => base_value,
         Err(e) => {

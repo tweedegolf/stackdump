@@ -1,9 +1,6 @@
 use self::{value::Value, variable_type::VariableType};
 use stackdump_core::device_memory::MemoryReadError;
-use std::{
-    fmt::{Debug, UpperHex},
-    ops::Range,
-};
+use std::{fmt::Debug, ops::Range};
 use thiserror::Error;
 
 pub mod rendering;
@@ -14,14 +11,14 @@ pub type TypeValueNode<ADDR> = trees::Node<TypeValue<ADDR>>;
 pub type TypeValueTree<ADDR> = trees::Tree<TypeValue<ADDR>>;
 
 #[derive(Debug, Clone)]
-pub struct TypeValue<ADDR: AddressType> {
+pub struct TypeValue<ADDR: funty::Integral> {
     pub name: String,
     pub variable_type: VariableType,
     pub bit_range: Range<u64>,
     pub variable_value: Result<Value<ADDR>, VariableDataError>,
 }
 
-impl<ADDR: AddressType> TypeValue<ADDR> {
+impl<ADDR: funty::Integral> TypeValue<ADDR> {
     pub fn bit_length(&self) -> u64 {
         self.bit_range.end - self.bit_range.start
     }
@@ -31,7 +28,7 @@ impl<ADDR: AddressType> TypeValue<ADDR> {
     }
 }
 
-impl<ADDR: AddressType> Default for TypeValue<ADDR> {
+impl<ADDR: funty::Integral> Default for TypeValue<ADDR> {
     fn default() -> Self {
         Self {
             name: Default::default(),
@@ -66,11 +63,3 @@ pub enum VariableDataError {
     #[error("Unknown")]
     Unknown,
 }
-
-pub trait AddressType: UpperHex + Debug + Copy + Eq {}
-
-impl AddressType for u8 {}
-impl AddressType for u16 {}
-impl AddressType for u32 {}
-impl AddressType for u64 {}
-impl AddressType for u128 {}

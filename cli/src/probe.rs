@@ -1,9 +1,10 @@
+use crate::Arguments;
 use probe_rs::{config::TargetSelector, DebugProbeSelector, Permissions, Probe, Session};
 use stackdump_capture_probe::StackdumpCapturer;
-use stackdump_trace::stackdump_core::device_memory::DeviceMemory;
+use stackdump_trace::{
+    platform::cortex_m::CortexMPlatform, stackdump_core::device_memory::DeviceMemory,
+};
 use std::{error::Error, path::Path, time::Duration};
-
-use crate::Arguments;
 
 pub(crate) fn trace_probe(
     elf_file: &Path,
@@ -38,7 +39,7 @@ pub(crate) fn trace_probe(
     device_memory.add_memory_region(stackcapturer);
 
     if core_type.is_cortex_m() {
-        let frames = stackdump_trace::cortex_m::trace(device_memory, &elf_data)?;
+        let frames = stackdump_trace::platform::trace::<CortexMPlatform>(device_memory, &elf_data)?;
         crate::print_frames(frames, args);
     } else {
         unimplemented!("Other tracing than on cortex-m is not yet implemented");

@@ -1,24 +1,23 @@
 #![doc = include_str!("../README.md")]
 // #![warn(missing_docs)]
 
-use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
-use render_colors::dark::{color_type_name, color_variable_name};
-use std::{
-    fmt::{Debug, Display},
-    rc::Rc,
-};
-use type_value_tree::{rendering::render_type_value_tree, AddressType, TypeValueTree};
-
 pub use stackdump_core;
 
 use crate::{
     render_colors::dark::{color_function, color_info, color_url},
     type_value_tree::variable_type::Archetype,
 };
+use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
+use render_colors::dark::{color_type_name, color_variable_name};
+use std::{
+    fmt::{Debug, Display},
+    rc::Rc,
+};
+use type_value_tree::{rendering::render_type_value_tree, TypeValueTree};
 
-pub mod cortex_m;
 pub mod error;
 mod gimli_extensions;
+pub mod platform;
 mod render_colors;
 pub mod type_value_tree;
 
@@ -54,7 +53,7 @@ impl Display for Location {
 /// An object containing a de-inlined stack frame.
 /// Exceptions/interrupts are also a frame.
 #[derive(Debug, Clone)]
-pub struct Frame<ADDR: AddressType> {
+pub struct Frame<ADDR: funty::Integral> {
     /// The name of the function the frame is in
     pub function: String,
     /// The code location of the frame
@@ -65,7 +64,7 @@ pub struct Frame<ADDR: AddressType> {
     pub variables: Vec<Variable<ADDR>>,
 }
 
-impl<ADDR: AddressType> Frame<ADDR> {
+impl<ADDR: funty::Integral> Frame<ADDR> {
     /// Get a string that can be displayed to a user
     ///
     /// - `show_parameters`: When true, any variable that is a parameter will be shown
@@ -112,7 +111,7 @@ impl<ADDR: AddressType> Frame<ADDR> {
     }
 }
 
-impl<ADDR: AddressType> Display for Frame<ADDR> {
+impl<ADDR: funty::Integral> Display for Frame<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display(true, false, false))
     }
@@ -147,7 +146,7 @@ impl Display for FrameType {
 
 /// A variable that was found in the tracing procedure
 #[derive(Debug, Clone)]
-pub struct Variable<ADDR: AddressType> {
+pub struct Variable<ADDR: funty::Integral> {
     /// The name of the variable
     pub name: String,
     /// The kind of variable (normal, parameter, etc)
@@ -157,7 +156,7 @@ pub struct Variable<ADDR: AddressType> {
     pub location: Location,
 }
 
-impl<ADDR: AddressType> Display for Variable<ADDR> {
+impl<ADDR: funty::Integral> Display for Variable<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut kind_text = self.kind.to_string();
         if !kind_text.is_empty() {

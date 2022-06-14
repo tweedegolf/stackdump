@@ -2,7 +2,7 @@
 
 use arrayvec::ArrayVec;
 use core::fmt::Debug;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// The identifier that is being used in the byte iterator to be able to differentiate between register data and memory regions
 pub const REGISTER_DATA_IDENTIFIER: u8 = 0x02;
@@ -10,7 +10,7 @@ pub const REGISTER_DATA_IDENTIFIER: u8 = 0x02;
 /// A trait for reading registers from a register collection
 ///
 /// This
-pub trait RegisterData<RB: RegisterBacking>: Debug {
+pub trait RegisterData<RB: funty::Integral>: Debug {
     /// Try to get the value of the given register.
     /// Returns None if the register is not present in this collection.
     fn register(&self, register: gimli::Register) -> Option<RB>;
@@ -35,7 +35,7 @@ pub struct ArrayRegisterData<const SIZE: usize, RB> {
     registers: ArrayVec<RB, SIZE>,
 }
 
-impl<const SIZE: usize, RB: RegisterBacking> ArrayRegisterData<SIZE, RB> {
+impl<const SIZE: usize, RB: funty::Integral> ArrayRegisterData<SIZE, RB> {
     /// Create a new register collection backed by an array
     ///
     /// - The registers must be sequential according to the dwarf register numbers.
@@ -66,7 +66,7 @@ impl<const SIZE: usize, RB: RegisterBacking> ArrayRegisterData<SIZE, RB> {
     /// intermediate_buffer.extend(regs1.bytes());
     /// intermediate_buffer.extend(regs2.bytes());
     ///
-    /// let mut intermediate_iter = intermediate_buffer.iter();
+    /// let mut intermediate_iter = intermediate_buffer.iter().copied();
     ///
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
@@ -80,7 +80,7 @@ impl<const SIZE: usize, RB: RegisterBacking> ArrayRegisterData<SIZE, RB> {
     }
 }
 
-impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterData<SIZE, RB> {
+impl<const SIZE: usize, RB: funty::Integral> RegisterData<RB> for ArrayRegisterData<SIZE, RB> {
     fn register(&self, register: gimli::Register) -> Option<RB> {
         let local_register_index = register.0.checked_sub(self.starting_register_number)?;
         self.registers.get(local_register_index as usize).copied()
@@ -95,15 +95,11 @@ impl<const SIZE: usize, RB: RegisterBacking> RegisterData<RB> for ArrayRegisterD
     }
 }
 
-impl<'a, const SIZE: usize, RB: RegisterBacking> FromIterator<&'a u8>
-    for ArrayRegisterData<SIZE, RB>
+impl<const SIZE: usize, RB> FromIterator<u8> for ArrayRegisterData<SIZE, RB>
+where
+    RB: funty::Integral,
+    RB::Bytes: for<'a> TryFrom<&'a [u8]>,
 {
-    fn from_iter<T: IntoIterator<Item = &'a u8>>(iter: T) -> Self {
-        Self::from_iter(iter.into_iter().copied())
-    }
-}
-
-impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterData<SIZE, RB> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         // Get the iterator. We assume that it is in the same format as the bytes function outputs
         let mut iter = iter.into_iter();
@@ -133,8 +129,13 @@ impl<const SIZE: usize, RB: RegisterBacking> FromIterator<u8> for ArrayRegisterD
             register_bytes_buffer.push(byte);
 
             if register_bytes_buffer.len() == register_size {
-                registers.push(RB::from_le_slice(&register_bytes_buffer));
-                register_bytes_buffer.clear();
+                registers.push(RB::from_le_bytes(
+                    register_bytes_buffer
+                        .as_slice()
+                        .try_into()
+                        .unwrap_or_else(|_| panic!()),
+                ));
+                register_bytes_buffer = ArrayVec::new();
             }
         }
 
@@ -160,7 +161,7 @@ pub struct VecRegisterData<RB> {
 }
 
 #[cfg(feature = "std")]
-impl<RB: RegisterBacking> VecRegisterData<RB> {
+impl<RB: funty::Integral> VecRegisterData<RB> {
     /// Create a new register collection backed by a vec
     ///
     /// - The registers must be sequential according to the dwarf register numbers.
@@ -191,7 +192,7 @@ impl<RB: RegisterBacking> VecRegisterData<RB> {
     /// intermediate_buffer.extend(regs1.bytes());
     /// intermediate_buffer.extend(regs2.bytes());
     ///
-    /// let mut intermediate_iter = intermediate_buffer.iter();
+    /// let mut intermediate_iter = intermediate_buffer.iter().copied();
     ///
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
@@ -206,7 +207,7 @@ impl<RB: RegisterBacking> VecRegisterData<RB> {
 }
 
 #[cfg(feature = "std")]
-impl<RB: RegisterBacking> RegisterData<RB> for VecRegisterData<RB> {
+impl<RB: funty::Integral> RegisterData<RB> for VecRegisterData<RB> {
     fn register(&self, register: gimli::Register) -> Option<RB> {
         let local_register_index = register.0.checked_sub(self.starting_register_number)?;
         self.registers.get(local_register_index as usize).copied()
@@ -222,14 +223,11 @@ impl<RB: RegisterBacking> RegisterData<RB> for VecRegisterData<RB> {
 }
 
 #[cfg(feature = "std")]
-impl<'a, RB: RegisterBacking> FromIterator<&'a u8> for VecRegisterData<RB> {
-    fn from_iter<T: IntoIterator<Item = &'a u8>>(iter: T) -> Self {
-        Self::from_iter(iter.into_iter().copied())
-    }
-}
-
-#[cfg(feature = "std")]
-impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
+impl<RB> FromIterator<u8> for VecRegisterData<RB>
+where
+    RB: funty::Integral,
+    RB::Bytes: for<'a> TryFrom<&'a [u8]>,
+{
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
@@ -253,7 +251,12 @@ impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
             register_bytes_buffer.push(byte);
 
             if register_bytes_buffer.len() == register_size {
-                registers.push(RB::from_le_slice(&register_bytes_buffer));
+                registers.push(RB::from_le_bytes(
+                    register_bytes_buffer
+                        .as_slice()
+                        .try_into()
+                        .unwrap_or_else(|_| panic!()),
+                ));
                 register_bytes_buffer.clear();
             }
         }
@@ -268,13 +271,13 @@ impl<RB: RegisterBacking> FromIterator<u8> for VecRegisterData<RB> {
 }
 
 /// An iterator that iterates over the serialized bytes of register data
-pub struct RegisterDataBytesIterator<'a, RB: RegisterBacking> {
+pub struct RegisterDataBytesIterator<'a, RB: funty::Integral> {
     starting_register_number: u16,
     registers: &'a [RB],
     index: usize,
 }
 
-impl<'a, RB: RegisterBacking> Iterator for RegisterDataBytesIterator<'a, RB> {
+impl<'a, RB: funty::Integral> Iterator for RegisterDataBytesIterator<'a, RB> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -313,36 +316,6 @@ impl<'a, RB: RegisterBacking> Iterator for RegisterDataBytesIterator<'a, RB> {
         }
     }
 }
-
-/// A trait representing the types that can be used to back the data of a register.
-/// This is different for every platform, so we need to be generic about it.
-pub trait RegisterBacking: Debug + Serialize + DeserializeOwned + Copy {
-    /// Get the register in Little Endian format.
-    /// This step is important on Big Endian architectures.
-    fn to_le(&self) -> Self;
-    /// Get Self from a slice of bytes in Little Endian format.
-    fn from_le_slice(data: &[u8]) -> Self;
-}
-
-macro_rules! impl_register_backing {
-    ($t:ty) => {
-        impl RegisterBacking for $t {
-            fn to_le(&self) -> Self {
-                Self::to_le(*self)
-            }
-
-            fn from_le_slice(data: &[u8]) -> Self {
-                Self::from_le_bytes(data.try_into().unwrap())
-            }
-        }
-    };
-}
-
-impl_register_backing!(u8);
-impl_register_backing!(u16);
-impl_register_backing!(u32);
-impl_register_backing!(u64);
-impl_register_backing!(u128);
 
 #[cfg(test)]
 mod tests {

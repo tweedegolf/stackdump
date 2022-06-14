@@ -4,10 +4,13 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use probe::trace_probe;
 use probe_rs::DebugProbeSelector;
-use stackdump_trace::stackdump_core::{
-    device_memory::DeviceMemory,
-    memory_region::{VecMemoryRegion, MEMORY_REGION_IDENTIFIER},
-    register_data::{VecRegisterData, REGISTER_DATA_IDENTIFIER},
+use stackdump_trace::{
+    platform::cortex_m::CortexMPlatform,
+    stackdump_core::{
+        device_memory::DeviceMemory,
+        memory_region::{VecMemoryRegion, MEMORY_REGION_IDENTIFIER},
+        register_data::{VecRegisterData, REGISTER_DATA_IDENTIFIER},
+    },
 };
 use std::{
     error::Error,
@@ -79,7 +82,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     match &args.platform {
         Platform::CortexM { elf_file, dumps } => {
             let (elf_data, device_memory) = read_files_into_device_memory(elf_file, dumps)?;
-            let frames = stackdump_trace::cortex_m::trace(device_memory, &elf_data)?;
+            let frames =
+                stackdump_trace::platform::trace::<CortexMPlatform>(device_memory, &elf_data)?;
             print_frames(frames, &args);
         }
         Platform::Probe {
