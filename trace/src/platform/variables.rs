@@ -100,12 +100,15 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
     Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
 }
 
-fn try_read_frame_base(
+fn try_read_frame_base<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
-    device_memory: &DeviceMemory<u32>,
+    device_memory: &DeviceMemory<W>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<Option<u32>, TraceError> {
+) -> Result<Option<W>, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     let frame_base_location = evaluate_location(
         dwarf,
         unit,
@@ -115,7 +118,7 @@ fn try_read_frame_base(
     )?;
     let frame_base_data = get_variable_data(
         device_memory,
-        4 * 8, // Frame base is 4 bytes on cortex-m (TODO crossplatform)
+        core::mem::size_of::<W>() as u64 * 8,
         frame_base_location,
     );
 
@@ -234,12 +237,12 @@ fn read_data_member_location(
 ///
 /// The given node should come from the [get_entry_type_reference_tree]
 /// and [get_entry_abstract_origin_reference_tree] functions.
-fn build_type_value_tree(
+fn build_type_value_tree<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
-) -> Result<TypeValueTree<u32>, TraceError> {
+) -> Result<TypeValueTree<W>, TraceError> {
     // Get the root entry and its tag
     let entry = node.entry();
     let entry_tag = entry.tag().to_string();
@@ -700,12 +703,12 @@ fn build_type_value_tree(
 ///
 /// - `location`: The `DW_AT_location` attribute value of the entry of the variable we want to get the location of.
 /// This may be a None if the variable has no location attribute.
-fn evaluate_location(
+fn evaluate_location<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
-    device_memory: &DeviceMemory<u32>,
+    device_memory: &DeviceMemory<W>,
     location: Option<Attribute<DefaultReader>>,
-    frame_base: Option<u32>,
+    frame_base: Option<W>,
 ) -> Result<VariableLocationResult, TraceError> {
     // First, we need to have the actual value
     let location = match location {
@@ -722,11 +725,11 @@ fn evaluate_location(
             let mut location = None;
 
             while let Ok(Some(maybe_location)) = locations.next() {
-                // The .debug_loc does not seem to count the thumb bit, so remove it
-                let check_pc =
-                    u64::from(device_memory.register(gimli::Arm::PC)? & !super::THUMB_BIT);
+                let check_pc = device_memory.register(gimli::Arm::PC)?;
 
-                if check_pc >= maybe_location.range.begin && check_pc < maybe_location.range.end {
+                if check_pc.as_u64() >= maybe_location.range.begin
+                    && check_pc.as_u64() < maybe_location.range.end
+                {
                     location = Some(maybe_location);
                     break;
                 }
@@ -758,14 +761,14 @@ fn evaluate_location(
             } => {
                 let value = device_memory.register(register)?;
                 let value = match base_type.0 {
-                    0 => gimli::Value::Generic(value.into()),
+                    0 => gimli::Value::Generic(value.as_u64()),
                     _ => todo!("Other types than generic haven't been implemented yet"),
                 };
                 result = location_evaluation.resume_with_register(value)?;
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
                 result = location_evaluation.resume_with_frame_base(
-                    frame_base.ok_or(TraceError::UnknownFrameBase)? as u64,
+                    frame_base.ok_or(TraceError::UnknownFrameBase)?.as_u64(),
                 )?;
             }
             EvaluationResult::RequiresRelocatedAddress(address) => {
@@ -797,17 +800,20 @@ fn evaluate_location(
 /// - `device_memory`: The captured memory of the device
 /// - `piece`: The piece of memory location that tells us which data needs to be read
 /// - `variable_size`: The size of the variable in bytes
-fn get_piece_data(
-    device_memory: &DeviceMemory<u32>,
+fn get_piece_data<W: funty::Integral>(
+    device_memory: &DeviceMemory<W>,
     piece: &Piece<DefaultReader, usize>,
     variable_size: u64,
-) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, VariableDataError> {
+) -> Result<Option<bitvec::vec::BitVec<u8, Lsb0>>, VariableDataError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     let mut data = match piece.location.clone() {
         gimli::Location::Empty => return Err(VariableDataError::OptimizedAway),
         gimli::Location::Register { register } => Some(
             device_memory
                 .register(register)
-                .map(|r| r.to_ne_bytes().view_bits().to_bitvec())
+                .map(|r| r.to_ne_bytes().view_bits().to_bitvec()) // TODO: Is this correct? Shouldn't this be the endianness of the target device?
                 .map_err(|e| VariableDataError::NoDataAvailableAt(e.to_string()))?,
         ),
         gimli::Location::Address { address } => device_memory
@@ -859,11 +865,14 @@ fn get_piece_data(
 /// - `device_memory`: All the captured memory of the device
 /// - `variable_size`: The size of the variable in bits
 /// - `variable_location`: The location of the variable
-fn get_variable_data(
-    device_memory: &DeviceMemory<u32>,
+fn get_variable_data<W: funty::Integral>(
+    device_memory: &DeviceMemory<W>,
     variable_size: u64,
     variable_location: VariableLocationResult,
-) -> Result<BitVec<u8, Lsb0>, VariableDataError> {
+) -> Result<BitVec<u8, Lsb0>, VariableDataError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     match variable_location {
         VariableLocationResult::NoLocationAttribute => Err(VariableDataError::OptimizedAway),
         VariableLocationResult::LocationListNotFound => Err(VariableDataError::OptimizedAway),
@@ -898,10 +907,10 @@ fn get_variable_data(
     }
 }
 
-fn read_base_type(
+fn read_base_type<W: funty::Integral>(
     encoding: gimli::DwAte,
     data: &BitSlice<u8, Lsb0>,
-) -> Result<Value<u32>, VariableDataError> {
+) -> Result<Value<W>, VariableDataError> {
     match encoding {
         gimli::constants::DW_ATE_unsigned => match data.len() {
             8 => Ok(Value::Uint(data.load_le::<u8>() as _)),
@@ -926,7 +935,18 @@ fn read_base_type(
         },
         gimli::constants::DW_ATE_boolean => Ok(Value::Bool(data.iter().any(|v| *v))),
         gimli::constants::DW_ATE_address => match data.len() {
-            32 => Ok(Value::Address(data.load_le::<u32>() as _)),
+            8 => Ok(Value::Address(
+                data.load_le::<u8>().try_into().ok().unwrap(),
+            )),
+            16 => Ok(Value::Address(
+                data.load_le::<u16>().try_into().ok().unwrap(),
+            )),
+            32 => Ok(Value::Address(
+                data.load_le::<u32>().try_into().ok().unwrap(),
+            )),
+            64 => Ok(Value::Address(
+                data.load_le::<u64>().try_into().ok().unwrap(),
+            )),
             _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
         },
         t => Err(VariableDataError::UnsupportedBaseType {
@@ -940,10 +960,10 @@ fn read_base_type(
 ///
 /// If it can be read, an Ok with the most literal value format is returned.
 /// If it can not be read, an Err is returned with a user displayable error.
-fn read_variable_data(
-    mut variable: Pin<&mut TypeValueNode<u32>>,
+fn read_variable_data<W: funty::Integral>(
+    mut variable: Pin<&mut TypeValueNode<W>>,
     data: &BitSlice<u8, Lsb0>,
-    device_memory: &DeviceMemory<u32>,
+    device_memory: &DeviceMemory<W>,
 ) {
     // We may not have enough data in some cases
     // I don't know why that is, so let's just print a warning
@@ -1020,7 +1040,7 @@ fn read_variable_data(
                     (Ok(Ok(Value::Address(pointer))), Ok(Ok(Value::Uint(length)))) => {
                         // We can read the data. This works because the length field denotes the byte size, not the char size
                         let data = device_memory
-                            .read_slice(*pointer as u64..*pointer as u64 + *length as u64);
+                            .read_slice(pointer.as_u64()..pointer.as_u64() + *length as u64);
                         if let Ok(Some(data)) = data {
                             variable.data_mut().variable_value =
                                 Ok(Value::String(data, StringFormat::Utf8));
@@ -1072,7 +1092,8 @@ fn read_variable_data(
             match address {
                 Ok(address) => {
                     let pointee_data = device_memory.read_slice(
-                        address as u64..address as u64 + div_ceil(pointee.data().bit_range.end, 8),
+                        address.as_u64()
+                            ..address.as_u64() + div_ceil(pointee.data().bit_range.end, 8),
                     );
 
                     match pointee_data {
@@ -1126,14 +1147,17 @@ fn read_variable_data(
     }
 }
 
-fn read_variable_entry(
+fn read_variable_entry<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
-    device_memory: &DeviceMemory<u32>,
-    frame_base: Option<u32>,
+    device_memory: &DeviceMemory<W>,
+    frame_base: Option<W>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<Option<Variable<u32>>, TraceError> {
+) -> Result<Option<Variable<W>>, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     let mut abstract_origin_tree =
         get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
     let abstract_origin_node = abstract_origin_tree
@@ -1254,22 +1278,28 @@ fn read_variable_entry(
     }
 }
 
-pub fn find_variables_in_function(
+pub fn find_variables_in_function<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
-    device_memory: &DeviceMemory<u32>,
+    device_memory: &DeviceMemory<W>,
     node: gimli::EntriesTreeNode<DefaultReader>,
-) -> Result<Vec<Variable<u32>>, TraceError> {
-    fn recursor(
+) -> Result<Vec<Variable<W>>, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
+    fn recursor<W: funty::Integral>(
         dwarf: &Dwarf<DefaultReader>,
         unit: &Unit<DefaultReader, usize>,
         abbreviations: &Abbreviations,
-        device_memory: &DeviceMemory<u32>,
+        device_memory: &DeviceMemory<W>,
         node: gimli::EntriesTreeNode<DefaultReader>,
-        variables: &mut Vec<Variable<u32>>,
-        mut frame_base: Option<u32>,
-    ) -> Result<(), TraceError> {
+        variables: &mut Vec<Variable<W>>,
+        mut frame_base: Option<W>,
+    ) -> Result<(), TraceError>
+    where
+        <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+    {
         let entry = node.entry();
 
         log::trace!(
@@ -1320,18 +1350,24 @@ pub fn find_variables_in_function(
     Ok(variables)
 }
 
-pub fn find_static_variables(
+pub fn find_static_variables<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
-    device_memory: &DeviceMemory<u32>,
-) -> Result<Vec<Variable<u32>>, TraceError> {
-    fn recursor(
+    device_memory: &DeviceMemory<W>,
+) -> Result<Vec<Variable<W>>, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
+    fn recursor<W: funty::Integral>(
         dwarf: &Dwarf<DefaultReader>,
         unit: &Unit<DefaultReader, usize>,
         abbreviations: &Abbreviations,
-        device_memory: &DeviceMemory<u32>,
+        device_memory: &DeviceMemory<W>,
         node: gimli::EntriesTreeNode<DefaultReader>,
-        variables: &mut Vec<Variable<u32>>,
-    ) -> Result<(), TraceError> {
+        variables: &mut Vec<Variable<W>>,
+    ) -> Result<(), TraceError>
+    where
+        <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+    {
         let entry = node.entry();
 
         match entry.tag() {

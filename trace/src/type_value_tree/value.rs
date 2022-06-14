@@ -1,9 +1,7 @@
 use std::fmt::Display;
 
-use super::AddressType;
-
 #[derive(Debug, Clone)]
-pub enum Value<ADDR: AddressType> {
+pub enum Value<ADDR: funty::Integral> {
     Unit,
     Object,
     Bool(bool),
@@ -17,7 +15,7 @@ pub enum Value<ADDR: AddressType> {
     Enumeration,
 }
 
-impl<ADDR: AddressType> Display for Value<ADDR> {
+impl<ADDR: funty::Integral> Display for Value<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Unit => write!(f, "()"),
@@ -48,7 +46,7 @@ impl<ADDR: AddressType> Display for Value<ADDR> {
     }
 }
 
-impl<ADDR: AddressType> PartialEq for Value<ADDR> {
+impl<ADDR: funty::Integral> PartialEq for Value<ADDR> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
