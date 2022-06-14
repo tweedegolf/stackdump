@@ -21,6 +21,7 @@
 - Made it so that transparent types can be added to lessen the clutter in the trace
 - Object member pointers (objects with the `DW_AT_containing_type` attribute) are now detected an not displayed by default. This hides all of the vtables.
 - Subroutines now display a `_` instead of an `Unknown` error
+- Strings longer than 64kb are no longer read to improve performance
 
 ### Core
 

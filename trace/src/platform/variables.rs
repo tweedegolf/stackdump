@@ -250,6 +250,8 @@ fn build_type_value_tree<W: funty::Integral>(
     let mut type_value_tree = TypeValueTree::new(TypeValue::default());
     let mut type_value = type_value_tree.root_mut();
 
+    log::info!("Building type value tree for {:?} at {:X?}", get_entry_name(dwarf, unit, entry), entry.offset().to_debug_info_offset(&unit.header));
+
     // The tag tells us what the base type it
     match entry.tag() {
         gimli::constants::DW_TAG_variant_part => {
@@ -1037,7 +1039,7 @@ fn read_variable_data<W: funty::Integral>(
                     .map(|node| &node.data().variable_value);
 
                 match (pointer, length) {
-                    (Ok(Ok(Value::Address(pointer))), Ok(Ok(Value::Uint(length)))) => {
+                    (Ok(Ok(Value::Address(pointer))), Ok(Ok(Value::Uint(length)))) if *length < 64 * 1024 => {
                         // We can read the data. This works because the length field denotes the byte size, not the char size
                         let data = device_memory
                             .read_slice(pointer.as_u64()..pointer.as_u64() + *length as u64);
@@ -1049,8 +1051,13 @@ fn read_variable_data<W: funty::Integral>(
                             variable.data_mut().variable_value = Ok(Value::Object);
                         }
                     }
+                    (Ok(Ok(Value::Address(_))), Ok(Ok(Value::Uint(length)))) if *length >= 64 * 1024 => {
+                        log::warn!("We started decoding the string {}, but it is {length} bytes long", variable.data().name);
+                        // There's something wrong. Fall back to treating the string as an object
+                        variable.data_mut().variable_value = Ok(Value::Object);
+                    }
                     _ => {
-                        log::error!("We started decoding a string, but found an error");
+                        log::error!("We started decoding the string {}, but found an error", variable.data().name);
                         // There's something wrong. Fall back to treating the string as an object
                         variable.data_mut().variable_value = Ok(Value::Object);
                     }
@@ -1234,6 +1241,7 @@ where
             let variable_location =
                 evaluate_location(dwarf, unit, device_memory, location_attr, frame_base)?;
 
+            log::debug!("Reading variable data for `{variable_name}` at {variable_location:X?} of {} bits", variable_type_value_tree.data().bit_length());
             let variable_data = get_variable_data(
                 device_memory,
                 variable_type_value_tree.data().bit_length(),
