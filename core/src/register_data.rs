@@ -66,7 +66,7 @@ impl<const SIZE: usize, RB: funty::Integral> ArrayRegisterData<SIZE, RB> {
     /// intermediate_buffer.extend(regs1.bytes());
     /// intermediate_buffer.extend(regs2.bytes());
     ///
-    /// let mut intermediate_iter = intermediate_buffer.iter();
+    /// let mut intermediate_iter = intermediate_buffer.iter().copied();
     ///
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
@@ -192,7 +192,7 @@ impl<RB: funty::Integral> VecRegisterData<RB> {
     /// intermediate_buffer.extend(regs1.bytes());
     /// intermediate_buffer.extend(regs2.bytes());
     ///
-    /// let mut intermediate_iter = intermediate_buffer.iter();
+    /// let mut intermediate_iter = intermediate_buffer.iter().copied();
     ///
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));

@@ -27,6 +27,7 @@
 - *Breaking*: Simplified the MemoryRegion trait and made it fallible
 - *Breaking*: Simplified the RegisterData trait
 - *Breaking*: DeviceMemory now takes a `'memory` lifetime so that not all data has to be owned
+- *Breaking*: The FromIterator impl taking `&u8` has been removed leaving only one impl that takes `u8`. Just pass an iterator with `.copied()` to it.
 
 ## Capture 0.2.0 (03-05-22)
 
