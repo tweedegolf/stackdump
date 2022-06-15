@@ -1,18 +1,20 @@
 //! All error types of the crate
 
+use std::rc::Rc;
+
 use stackdump_core::device_memory::{MemoryReadError, MissingRegisterError};
 use thiserror::Error;
 
 /// The main error type during the tracing procedure
 #[allow(missing_docs)]
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum TraceError {
     #[error("The elf file does not contain the required `{0}` section")]
     MissingElfSection(String),
     #[error("The elf file could not be read: {0}")]
     ObjectReadError(#[from] addr2line::object::Error),
     #[error("An IO error occured: {0}")]
-    IOError(#[from] std::io::Error),
+    IOError(Rc<std::io::Error>),
     #[error("Some memory could not be read: {0}")]
     MemoryReadError(#[from] MemoryReadError),
     #[error("Some debug information could not be parsed: {0}")]
@@ -60,4 +62,10 @@ pub enum TraceError {
         pointer_name: String,
         class_value: gimli::DwAddr,
     },
+}
+
+impl From<std::io::Error> for TraceError {
+    fn from(e: std::io::Error) -> Self {
+        Self::IOError(Rc::new(e))
+    }
 }

@@ -69,7 +69,16 @@ enum Platform {
     },
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() {
+    match result_main() {
+        Ok(_) => {}
+        Err(e) => {
+            println!("Error: {e}");
+        }
+    }
+}
+
+fn result_main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Off)
         .env()

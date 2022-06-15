@@ -1,11 +1,11 @@
-use crate::{error::TraceError, Frame, FrameType, Location};
+use crate::{error::TraceError, type_value_tree::TypeValueTree, Frame, FrameType, Location};
 use addr2line::object::{Object, ObjectSection, SectionKind};
 use funty::Fundamental;
-use gimli::{EndianRcSlice, RunTimeEndian};
+use gimli::{DebugInfoOffset, EndianRcSlice, RunTimeEndian};
 use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion};
+use std::collections::HashMap;
 
 pub mod cortex_m;
-mod variables;
 
 /// The result of an unwinding procedure
 pub enum UnwindResult<ADDR: funty::Integral> {
@@ -83,10 +83,29 @@ where
     // To unwind, we need the platform context
     let mut platform_context = P::create_context(&elf)?;
 
+    let mut type_cache = Default::default();
+
     // Now we need to keep looping until we unwound to the start of the program
     loop {
         // Get the frames of the current state
-        add_current_frames::<P>(&mut device_memory, &addr2line_context, &mut frames)?;
+        match add_current_frames::<P>(
+            &mut device_memory,
+            &addr2line_context,
+            &mut frames,
+            &mut type_cache,
+        ) {
+            Ok(_) => {}
+            Err(e @ TraceError::DwarfUnitNotFound { pc: _ }) => {
+                frames.push(Frame {
+                    function: "Unknown".into(),
+                    location: Location::default(),
+                    frame_type: FrameType::Corrupted(e.to_string()),
+                    variables: Vec::default(),
+                });
+                break;
+            }
+            Err(e) => return Err(e),
+        }
 
         // Try to unwind
         match platform_context.unwind(&mut device_memory, frames.last_mut())? {
@@ -119,8 +138,11 @@ where
     }
 
     // We're done with the stack data, but we can also decode the static variables and make a frame out of that
-    let static_variables =
-        variables::find_static_variables(addr2line_context.dwarf(), &device_memory)?;
+    let static_variables = crate::variables::find_static_variables(
+        addr2line_context.dwarf(),
+        &device_memory,
+        &mut type_cache,
+    )?;
     let static_frame = Frame {
         function: "Static".into(),
         location: Location {
@@ -141,6 +163,7 @@ fn add_current_frames<'a, P: Platform<'a>>(
     device_memory: &DeviceMemory<P::Word>,
     addr2line_context: &addr2line::Context<EndianRcSlice<RunTimeEndian>>,
     frames: &mut Vec<Frame<P::Word>>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<P::Word>, TraceError>>,
 ) -> Result<(), TraceError>
 where
     <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -184,12 +207,13 @@ where
             };
 
             if let Ok(entry_root) = entries.root() {
-                variables = variables::find_variables_in_function(
+                variables = crate::variables::find_variables_in_function(
                     addr2line_context.dwarf(),
                     unit,
                     &abbreviations,
                     device_memory,
                     entry_root,
+                    type_cache,
                 )?;
             }
         }

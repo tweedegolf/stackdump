@@ -6,8 +6,8 @@
 //! All functions can be reasoned with on the function level.
 //!
 
-use super::TraceError;
 use crate::{
+    error::TraceError,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
         value::{StringFormat, Value},
@@ -18,11 +18,13 @@ use crate::{
 };
 use bitvec::prelude::*;
 use gimli::{
-    Abbreviations, Attribute, AttributeValue, DebuggingInformationEntry, Dwarf, EntriesTree,
-    EvaluationResult, Piece, Reader, Unit,
+    Abbreviations, Attribute, AttributeValue, DebugInfoOffset, DebuggingInformationEntry, Dwarf,
+    EntriesTree, EvaluationResult, Piece, Reader, Unit,
 };
 use stackdump_core::device_memory::DeviceMemory;
-use std::pin::Pin;
+use std::{collections::HashMap, pin::Pin};
+
+mod type_value_tree_building;
 
 fn div_ceil(lhs: u64, rhs: u64) -> u64 {
     let d = lhs / rhs;
@@ -242,458 +244,69 @@ fn build_type_value_tree<W: funty::Integral>(
     unit: &Unit<DefaultReader, usize>,
     abbreviations: &Abbreviations,
     node: gimli::EntriesTreeNode<DefaultReader>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
 ) -> Result<TypeValueTree<W>, TraceError> {
     // Get the root entry and its tag
     let entry = node.entry();
-    let entry_tag = entry.tag().to_string();
+    let entry_die_offset = entry.offset().to_debug_info_offset(&unit.header).unwrap();
 
-    let mut type_value_tree = TypeValueTree::new(TypeValue::default());
-    let mut type_value = type_value_tree.root_mut();
+    if let Some(existing_type) = type_cache.get(&entry_die_offset) {
+        log::debug!(
+            "Using cached type value tree for {:?} at {:X} (tag: {})",
+            get_entry_name(dwarf, unit, entry),
+            entry_die_offset.0,
+            entry.tag()
+        );
 
-    log::info!(
-        "Building type value tree for {:?} at {:X?}",
+        return Ok((*existing_type).clone()?);
+    }
+
+    log::debug!(
+        "Building type value tree for {:?} at {:X} (tag: {})",
         get_entry_name(dwarf, unit, entry),
-        entry.offset().to_debug_info_offset(&unit.header)
+        entry_die_offset.0,
+        entry.tag()
     );
 
     // The tag tells us what the base type it
-    match entry.tag() {
-        gimli::constants::DW_TAG_variant_part => {
-            // We can't read the name and byte size, but we'll get that assigned when we return, so don't do that here
-            // Read the DW_AT_discr. It will have a reference to the DIE that we can read to know which variant is active.
-            // This will probably be an integer.
-            type_value.data_mut().variable_type.archetype = Archetype::TaggedUnion;
-            type_value.data_mut().variable_value = Ok(Value::Object);
-
-            let discriminant_attr = entry.required_attr(unit, gimli::constants::DW_AT_discr)?;
-
-            let discriminant_unit_offset =
-                if let AttributeValue::UnitRef(offset) = discriminant_attr.value() {
-                    Ok(offset)
-                } else {
-                    Err(TraceError::WrongAttributeValueType {
-                        attribute_name: discriminant_attr.name().to_string(),
-                        value_type_name: "UnitRef",
-                    })
-                }?;
-
-            let discriminant_entry = unit.entry(discriminant_unit_offset)?;
-
-            // We've got some data about the discriminant, let's make it our first type value child
-
-            let mut discriminant_tree =
-                get_entry_type_reference_tree(unit, abbreviations, &discriminant_entry).map(
-                    |mut type_tree| {
-                        type_tree
-                            .root()
-                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-                    },
-                )???;
-            discriminant_tree.root_mut().data_mut().name = "discriminant".into();
-
-            // The discriminant has its own member location, so we need to offset the bit range
-            let discriminant_location_offset_bits =
-                read_data_member_location(unit, &discriminant_entry)?;
-            discriminant_tree.root_mut().data_mut().bit_range.start +=
-                discriminant_location_offset_bits;
-            discriminant_tree.root_mut().data_mut().bit_range.end +=
-                discriminant_location_offset_bits;
-
-            type_value_tree.push_back(discriminant_tree);
-
-            // Now we need to read all of the variant parts which are the children of the entry.
-
-            let mut children = node.children();
-            while let Ok(Some(child)) = children.next() {
-                let variant_entry = child.entry();
-
-                // We'll find more nodes there as well like types and members. We can ignore those because if they are
-                // relevant, we'll find them indirectly. For example, the member we'll likely find is the discriminant and
-                // the types we'll find are the types that are defined for each variant.
-
-                if variant_entry.tag() != gimli::constants::DW_TAG_variant {
-                    continue;
-                }
-
-                // We've found a variant part!
-                // Three things can happen:
-                // 1. It has a DW_AT_discr_value
-                // 2. It has a DW_AT_discr_list
-                // 3. It has nothing
-                //
-                // The first gives the value the discriminant has to have for this variant to be active.
-                // The second one has a list of values, but I haven't seen that that being generated so far. We'll check
-                // and give an error in that case.
-                // A variant with nothing is the default case. If no other variant matches, then this one is selected.
-
-                let discr_value = variant_entry.attr(gimli::constants::DW_AT_discr_value)?;
-                let discr_list = variant_entry.attr(gimli::constants::DW_AT_discr_list)?;
-
-                let discriminator_value = match (discr_value, discr_list) {
-                    (Some(discr_value), _) => Some(discr_value.required_sdata_value()?),
-                    (_, Some(_)) => {
-                        return Err(TraceError::OperationNotImplemented {
-                            operation: "Reading the discr_list".into(),
-                        })
-                    }
-                    (None, None) => None,
-                };
-
-                // We know the value, so we can create a type value tree for the variant part
-
-                let mut variant_tree = TypeValueTree::new(TypeValue {
-                    name: "variant".into(),
-                    variable_type: VariableType {
-                        name: "".into(),
-                        archetype: Archetype::TaggedUnionVariant,
-                    },
-                    bit_range: 0..0,
-                    variable_value: discriminator_value
-                        .map(|v| Value::Int(v as _))
-                        .ok_or(VariableDataError::NoDataAvailable),
-                });
-
-                // Variant parts have one child that is their actual value
-
-                let mut variant_children = child.children();
-                let variant_member =
-                    variant_children
-                        .next()?
-                        .ok_or(TraceError::ExpectedChildNotPresent {
-                            entry_tag: "DW_TAG_variant_part".into(),
-                        })?;
-
-                let variant_member_bit_offset =
-                    read_data_member_location(unit, variant_member.entry())?;
-
-                let variant_member_tree =
-                    get_entry_type_reference_tree(unit, abbreviations, variant_member.entry())
-                        .map(|mut type_tree| {
-                        type_tree
-                            .root()
-                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-                    })???;
-
-                variant_tree.root_mut().data_mut().bit_range = variant_member_bit_offset
-                    ..variant_member_bit_offset + variant_member_tree.root().data().bit_length();
-
-                variant_tree.push_back(variant_member_tree);
-                type_value_tree.push_back(variant_tree);
-            }
-
-            Ok(type_value_tree)
-        }
+    let result = match entry.tag() {
+        gimli::constants::DW_TAG_variant_part => type_value_tree_building::build_tagged_union(
+            dwarf,
+            unit,
+            abbreviations,
+            node,
+            type_cache,
+        ),
         tag @ gimli::constants::DW_TAG_structure_type
         | tag @ gimli::constants::DW_TAG_union_type
-        | tag @ gimli::constants::DW_TAG_class_type => {
-            // We have an object with members
-            // The informations we can gather is:
-            // - type name
-            // - type parameters
-            // - the members of the object
-            // - the byte size of the object
-
-            let type_name = get_entry_name(dwarf, unit, entry)?;
-            let byte_size = entry
-                .required_attr(unit, gimli::constants::DW_AT_byte_size)?
-                .required_udata_value()?;
-
-            // Check if this is a type that wraps another type
-            let is_member_pointer = entry
-                .attr(gimli::constants::DW_AT_containing_type)?
-                .is_some();
-
-            let archetype = match (tag, is_member_pointer) {
-                (_, true) => Archetype::ObjectMemberPointer,
-                (gimli::constants::DW_TAG_structure_type, _) => Archetype::Structure,
-                (gimli::constants::DW_TAG_union_type, _) => Archetype::Union,
-                (gimli::constants::DW_TAG_class_type, _) => Archetype::Class,
-                _ => unreachable!(),
-            };
-
-            type_value.data_mut().variable_type.name = type_name.clone();
-            type_value.data_mut().variable_type.archetype = archetype;
-            type_value.data_mut().bit_range = 0..byte_size * 8;
-
-            // The members of the object can be found by looking at the children of the node
-            let mut children = node.children();
-            while let Ok(Some(child)) = children.next() {
-                let member_entry = child.entry();
-
-                // We can be a normal object, but we can also still be a tagged union.
-                // We know that we're a tagged union if one of the members has the `DW_TAG_variant_part` tag, so we'll check for that.
-                // If this object is a tagged union, then we will assume it isn't also a a normal object even though
-                // that could be the case with how the DWARF spec states things. This isn't something Rust and I think even C++ can do.
-
-                if member_entry.tag() == gimli::constants::DW_TAG_variant_part {
-                    // This is a tagged union, so ignore everything and build the type value tree from this child
-                    let mut tagged_union = build_type_value_tree(dwarf, unit, abbreviations, child);
-
-                    if let Ok(tagged_union) = tagged_union.as_mut() {
-                        // The tagged union child doesn't have a name or byte size, so we need to give it the name of the object we
-                        // we thought we would get
-                        tagged_union.root_mut().data_mut().variable_type.name = type_name;
-                        tagged_union.root_mut().data_mut().bit_range = 0..byte_size * 8;
-                    }
-
-                    return tagged_union;
-                }
-
-                // This is an object and not a tagged union
-
-                // Object children can be a couple of things:
-                // - Member fields
-                // - Sub programs (methods)
-                // - Other objects (TODO what does this mean?)
-
-                // Member fields have a name, a type and a location offset (relative to the base of the object).
-                // Type parameters only have a name and a type.
-                // The rest of the children are ignored.
-
-                let member_name = match get_entry_name(dwarf, unit, member_entry) {
-                    Ok(member_name) => member_name,
-                    Err(_) => continue, // Only care about named members for now
-                };
-
-                match member_entry.tag() {
-                    gimli::constants::DW_TAG_member => {
-                        let member_location_offset_bits =
-                            read_data_member_location(unit, member_entry)?;
-
-                        let mut member_tree =
-                            get_entry_type_reference_tree(unit, abbreviations, member_entry)
-                                .map(|mut type_tree| {
-                                type_tree.root().map(|root| {
-                                    build_type_value_tree(dwarf, unit, abbreviations, root)
-                                })
-                            })???;
-
-                        member_tree.root_mut().data_mut().name = member_name;
-                        member_tree.root_mut().data_mut().bit_range.end +=
-                            member_location_offset_bits;
-                        member_tree.root_mut().data_mut().bit_range.start +=
-                            member_location_offset_bits;
-
-                        type_value.push_back(member_tree);
-                    }
-                    gimli::constants::DW_TAG_template_type_parameter => {} // Ignore
-                    gimli::constants::DW_TAG_subprogram => {}              // Ignore
-                    gimli::constants::DW_TAG_structure_type
-                    | gimli::constants::DW_TAG_union_type
-                    | gimli::constants::DW_TAG_class_type => {} // Ignore
-                    member_tag => {
-                        return Err(TraceError::UnexpectedMemberTag {
-                            object_name: type_name,
-                            member_name,
-                            member_tag,
-                        })
-                    }
-                }
-            }
-
-            Ok(type_value_tree)
-        }
+        | tag @ gimli::constants::DW_TAG_class_type => type_value_tree_building::build_object(
+            dwarf,
+            unit,
+            abbreviations,
+            node,
+            type_cache,
+            tag,
+        ),
         gimli::constants::DW_TAG_base_type => {
-            // A base type is a primitive and there are many of them.
-            // Which base type this is, is recorded in the `DW_AT_encoding` attribute.
-            // The value of that attribute is a `DwAte`.
-
-            // We record the name, the encoding and the size of the primitive
-
-            let name = get_entry_name(dwarf, unit, entry)?;
-            let encoding = entry
-                .required_attr(unit, gimli::constants::DW_AT_encoding)
-                .map(|attr| {
-                    if let AttributeValue::Encoding(encoding) = attr.value() {
-                        Ok(encoding)
-                    } else {
-                        Err(TraceError::WrongAttributeValueType {
-                            attribute_name: attr.name().to_string(),
-                            value_type_name: "Encoding",
-                        })
-                    }
-                })??;
-            let byte_size = entry
-                .required_attr(unit, gimli::constants::DW_AT_byte_size)?
-                .required_udata_value()?;
-
-            type_value.data_mut().variable_type.name = name;
-            type_value.data_mut().variable_type.archetype = Archetype::BaseType(encoding);
-            type_value.data_mut().bit_range = 0..byte_size * 8;
-
-            Ok(type_value_tree)
+            type_value_tree_building::build_base_type(dwarf, unit, node)
         }
         gimli::constants::DW_TAG_pointer_type => {
-            // A pointer in this context is just a number.
-            // It has a name and a type that indicates the type of the object it points to.
-
-            let mut pointee_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
-                .map(|mut type_tree| {
-                    type_tree
-                        .root()
-                        .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-                })???;
-
-            pointee_type_tree.root_mut().data_mut().name = "pointee".into();
-
-            // Some pointers don't have names, but generally it is just `&<typename>`
-            // So if only the name is missing, we can recover
-
-            let name = get_entry_name(dwarf, unit, entry)
-                .unwrap_or_else(|_| format!("&{}", pointee_type_tree.data().variable_type.name));
-
-            // The debug info also contains an address class that can describe what kind of pointer it is.
-            // We only support `DW_ADDR_none` for now, which means that there's no special specification.
-            // We do perform the check though to be sure.
-
-            let address_class = entry
-                .required_attr(unit, gimli::constants::DW_AT_address_class)?
-                .required_address_class()?;
-            if address_class != gimli::constants::DW_ADDR_none {
-                return Err(TraceError::UnexpectedPointerClass {
-                    pointer_name: name,
-                    class_value: address_class,
-                });
-            }
-
-            type_value.data_mut().variable_type.name = name;
-            type_value.data_mut().variable_type.archetype = Archetype::Pointer;
-            type_value.data_mut().bit_range = 0..u32::BITS as u64; // TODO: Crossplatformness
-
-            type_value.push_back(pointee_type_tree);
-
-            Ok(type_value_tree)
+            type_value_tree_building::build_pointer(dwarf, unit, abbreviations, node, type_cache)
         }
         gimli::constants::DW_TAG_array_type => {
-            // Arrays are their own thing in DWARF.
-            // They have no name.
-            // What can be found on the entry are the type of the elements of the array and the byte size.
-            // Arrays have one child entry that contains information about the indexing of the array.
-
-            let mut base_element_type_tree =
-                get_entry_type_reference_tree(unit, abbreviations, entry).map(
-                    |mut type_tree| {
-                        type_tree
-                            .root()
-                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-                    },
-                )???;
-
-            base_element_type_tree.root_mut().data_mut().name = "base".into();
-
-            let byte_size = entry
-                .attr(gimli::constants::DW_AT_byte_size)?
-                .and_then(|bsize| bsize.udata_value());
-            let element_bitsize = base_element_type_tree.data().bit_length();
-
-            let mut children = node.children();
-            let child = children
-                .next()?
-                .ok_or(TraceError::ExpectedChildNotPresent { entry_tag })?;
-            let child_entry = child.entry();
-
-            let lower_bound = child_entry
-                .required_attr(unit, gimli::constants::DW_AT_lower_bound)?
-                .sdata_value()
-                .unwrap_or(0);
-
-            // There's either a count or an upper bound
-            let count = match (
-                child_entry
-                    .required_attr(unit, gimli::constants::DW_AT_count)
-                    .and_then(|c| c.required_udata_value()),
-                child_entry
-                    .required_attr(unit, gimli::constants::DW_AT_upper_bound)
-                    .and_then(|c| c.required_sdata_value()),
-            ) {
-                // We've got a count, so let's use that
-                (Ok(count), _) => Ok(count),
-                // We've got an upper bound, so let's calculate the count from that
-                (_, Ok(upper_bound)) => Ok((upper_bound - lower_bound).try_into().unwrap()),
-                // Both are not readable
-                (Err(e), Err(_)) => Err(e),
-            }?;
-
-            type_value.data_mut().bit_range.end = type_value.data_mut().bit_range.start
-                + byte_size
-                    .map(|byte_size| byte_size * 8)
-                    .unwrap_or_else(|| element_bitsize * count);
-            type_value.data_mut().variable_type.name = format!(
-                "[{};{}]",
-                base_element_type_tree.data().variable_type.name,
-                count
-            );
-            type_value.data_mut().variable_type.archetype = Archetype::Array;
-
-            for data_index in lower_bound..(lower_bound + count as i64) {
-                let mut element_type_tree = base_element_type_tree.clone();
-
-                element_type_tree.root_mut().data_mut().name = data_index.to_string();
-                element_type_tree.root_mut().data_mut().bit_range.start +=
-                    data_index as u64 * element_bitsize;
-                element_type_tree.root_mut().data_mut().bit_range.end +=
-                    data_index as u64 * element_bitsize;
-
-                type_value.push_back(element_type_tree);
-            }
-
-            Ok(type_value_tree)
+            type_value_tree_building::build_array(dwarf, unit, abbreviations, node, type_cache)
         }
-        gimli::constants::DW_TAG_enumeration_type => {
-            // This is an enum type (like a C-style enum).
-            // Enums have a name and also an underlying_type (which is usually an integer).
-            // The entry also has a child `DW_TAG_enumerator` for each variant.
-
-            let name = get_entry_name(dwarf, unit, entry)?;
-            let mut underlying_type_tree =
-                get_entry_type_reference_tree(unit, abbreviations, entry).map(
-                    |mut type_tree| {
-                        type_tree
-                            .root()
-                            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root))
-                    },
-                )???;
-            underlying_type_tree.root_mut().data_mut().name = "base".into();
-            let underlying_type_bitrange = underlying_type_tree.root().data().bit_range.clone();
-
-            type_value.data_mut().variable_type.name = name;
-            type_value.data_mut().variable_type.archetype = Archetype::Enumeration;
-            type_value.data_mut().bit_range = underlying_type_bitrange.clone();
-
-            type_value.push_back(underlying_type_tree);
-
-            let mut children = node.children();
-            while let Ok(Some(child)) = children.next() {
-                let enumerator_entry = child.entry();
-
-                // Each child is a DW_TAG_enumerator or DW_TAG_subprogram
-                if enumerator_entry.tag() != gimli::constants::DW_TAG_enumerator {
-                    continue;
-                }
-
-                // Each variant has a name and an integer value.
-                // If the enum has that value, then the enum is of that variant.
-                // This does of course not work for flag enums.
-
-                let enumerator_name = get_entry_name(dwarf, unit, enumerator_entry)?;
-                let const_value = enumerator_entry
-                    .required_attr(unit, gimli::constants::DW_AT_const_value)?
-                    .required_sdata_value()?;
-
-                type_value.push_back(TypeValueTree::new(TypeValue {
-                    name: enumerator_name,
-                    variable_type: VariableType {
-                        name: "".into(),
-                        archetype: Archetype::Enumerator,
-                    },
-                    bit_range: underlying_type_bitrange.clone(),
-                    variable_value: Ok(Value::Int(const_value as i128)),
-                }));
-            }
-
-            Ok(type_value_tree)
-        }
+        gimli::constants::DW_TAG_enumeration_type => type_value_tree_building::build_enumeration(
+            dwarf,
+            unit,
+            abbreviations,
+            node,
+            type_cache,
+        ),
         gimli::constants::DW_TAG_subroutine_type => {
+            let mut type_value_tree = TypeValueTree::new(TypeValue::default());
+            let mut type_value = type_value_tree.root_mut();
+
             type_value.data_mut().variable_type.archetype = Archetype::Subroutine;
             Ok(type_value_tree)
         } // Ignore
@@ -702,7 +315,13 @@ fn build_type_value_tree<W: funty::Integral>(
             entry_debug_info_offset: entry.offset().to_debug_info_offset(&unit.header).unwrap().0,
         })
         .unwrap(),
-    }
+    };
+
+    type_cache
+        .entry(entry_die_offset)
+        .or_insert_with(|| result.clone());
+
+    result
 }
 
 /// Runs the location evaluation of gimli.
@@ -970,6 +589,7 @@ fn read_variable_data<W: funty::Integral>(
     mut variable: Pin<&mut TypeValueNode<W>>,
     data: &BitSlice<u8, Lsb0>,
     device_memory: &DeviceMemory<W>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
 ) {
     // We may not have enough data in some cases
     // I don't know why that is, so let's just print a warning
@@ -988,7 +608,12 @@ fn read_variable_data<W: funty::Integral>(
             assert!(variable.front_mut().unwrap().data().name == "discriminant");
 
             // We have to read the discriminator, then select the active variant and then read that
-            read_variable_data(variable.front_mut().unwrap(), data, device_memory);
+            read_variable_data(
+                variable.front_mut().unwrap(),
+                data,
+                device_memory,
+                type_cache,
+            );
 
             let discriminator_value = match &variable.front().unwrap().data().variable_value {
                 Ok(value) => value.clone(),
@@ -1005,18 +630,23 @@ fn read_variable_data<W: funty::Integral>(
                 .find(|variant| variant.data().variable_value.as_ref() == Ok(&discriminator_value));
 
             if let Some(active_variant) = active_variant {
-                read_variable_data(active_variant, data, device_memory);
+                read_variable_data(active_variant, data, device_memory, type_cache);
             } else if let Some(default_variant) = variable
                 .iter_mut()
                 .skip(1)
                 .find(|variant| variant.data().variable_value.is_err())
             {
                 // There is no active variant, so we need to go for the default
-                read_variable_data(default_variant, data, device_memory);
+                read_variable_data(default_variant, data, device_memory, type_cache);
             }
         }
         Archetype::TaggedUnionVariant => {
-            read_variable_data(variable.front_mut().unwrap(), data, device_memory);
+            read_variable_data(
+                variable.front_mut().unwrap(),
+                data,
+                device_memory,
+                type_cache,
+            );
         }
         Archetype::Structure
         | Archetype::Union
@@ -1026,7 +656,7 @@ fn read_variable_data<W: funty::Integral>(
             // We simply need to read every child.
 
             for child in variable.iter_mut() {
-                read_variable_data(child, data, device_memory);
+                read_variable_data(child, data, device_memory, type_cache);
             }
 
             if &variable.data().variable_type.name == "&str" {
@@ -1092,9 +722,10 @@ fn read_variable_data<W: funty::Integral>(
                     };
             }
         }
-        Archetype::Pointer => {
+        Archetype::Pointer(die_offset) => {
             // The variable is a number that is the address of the pointee.
-            // The pointee is the single child of the tree.
+            // The pointee is not part of this tree yet and has to be looked up through the type_cache.
+            // This is done so that we cannot get an infinite recursive type due to e.g. linked lists.
 
             variable.data_mut().variable_value = match data.get(variable.data().bit_range_usize()) {
                 Some(data) => read_base_type(gimli::constants::DW_ATE_address, data),
@@ -1106,11 +737,29 @@ fn read_variable_data<W: funty::Integral>(
                 _ => Err(VariableDataError::InvalidPointerData),
             };
 
-            let mut pointee = variable
-                .front_mut()
-                .expect("Pointers must have a pointee child");
+            let pointee_tree_clone = match type_cache
+                .get(&die_offset)
+                .expect("Pointers must have their pointee type cached")
+                .clone()
+            {
+                Ok(pointee_tree_clone) => pointee_tree_clone,
+                Err(_) => TypeValueTree::new(TypeValue {
+                    name: "Pointee".into(),
+                    variable_type: VariableType {
+                        name: "".into(),
+                        archetype: Archetype::Unknown,
+                    },
+                    bit_range: 0..0,
+                    variable_value: Err(VariableDataError::Unknown),
+                }),
+            };
+            variable.push_back(pointee_tree_clone);
+            let mut pointee = variable.back_mut().unwrap();
 
             match address {
+                Ok(address) if address == W::ZERO => {
+                    pointee.data_mut().variable_value = Err(VariableDataError::NullPointer)
+                }
                 Ok(address) => {
                     let pointee_data = device_memory.read_slice(
                         address.as_u64()
@@ -1119,7 +768,12 @@ fn read_variable_data<W: funty::Integral>(
 
                     match pointee_data {
                         Ok(Some(pointee_data)) => {
-                            read_variable_data(pointee, pointee_data.view_bits(), device_memory);
+                            read_variable_data(
+                                pointee,
+                                pointee_data.view_bits(),
+                                device_memory,
+                                type_cache,
+                            );
                         }
                         Ok(None) => {
                             pointee.data_mut().variable_value =
@@ -1138,7 +792,7 @@ fn read_variable_data<W: funty::Integral>(
             // The tree has all children that we have to read. These are the elements of the array
             for mut element in variable.iter_mut() {
                 match data.get(element.data().bit_range_usize()) {
-                    Some(_) => read_variable_data(element, data, device_memory),
+                    Some(_) => read_variable_data(element, data, device_memory, type_cache),
                     None => {
                         element.data_mut().variable_value = Err(VariableDataError::NoDataAvailable)
                     }
@@ -1153,6 +807,7 @@ fn read_variable_data<W: funty::Integral>(
                 variable.front_mut().expect("Enumerations have a child"),
                 data,
                 device_memory,
+                type_cache,
             );
         }
         Archetype::Enumerator => {
@@ -1175,6 +830,7 @@ fn read_variable_entry<W: funty::Integral>(
     device_memory: &DeviceMemory<W>,
     frame_base: Option<W>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
 ) -> Result<Option<Variable<W>>, TraceError>
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -1204,7 +860,7 @@ where
     let variable_type_value_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
         .and_then(|mut type_tree| {
             let type_root = type_tree.root()?;
-            build_type_value_tree(dwarf, unit, abbreviations, type_root)
+            build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
         });
 
     // Alternatively, get the type from the abstract origin
@@ -1212,7 +868,7 @@ where
         (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
             .and_then(|mut type_tree| {
                 let type_root = type_tree.root()?;
-                build_type_value_tree(dwarf, unit, abbreviations, type_root)
+                build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
             }),
         (variable_type, _) => variable_type,
     };
@@ -1271,6 +927,7 @@ where
                     variable_type_value_tree.root_mut(),
                     &variable_data,
                     device_memory,
+                    type_cache,
                 ),
                 // We couldn't get the data, so set the value to the error we got
                 Err(e) => {
@@ -1309,6 +966,7 @@ pub fn find_variables_in_function<W: funty::Integral>(
     abbreviations: &Abbreviations,
     device_memory: &DeviceMemory<W>,
     node: gimli::EntriesTreeNode<DefaultReader>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
 ) -> Result<Vec<Variable<W>>, TraceError>
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -1321,6 +979,7 @@ where
         node: gimli::EntriesTreeNode<DefaultReader>,
         variables: &mut Vec<Variable<W>>,
         mut frame_base: Option<W>,
+        type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
     ) -> Result<(), TraceError>
     where
         <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -1339,9 +998,15 @@ where
         if entry.tag() == gimli::constants::DW_TAG_variable
             || entry.tag() == gimli::constants::DW_TAG_formal_parameter
         {
-            if let Some(variable) =
-                read_variable_entry(dwarf, unit, abbreviations, device_memory, frame_base, entry)?
-            {
+            if let Some(variable) = read_variable_entry(
+                dwarf,
+                unit,
+                abbreviations,
+                device_memory,
+                frame_base,
+                entry,
+                type_cache,
+            )? {
                 variables.push(variable);
             }
         }
@@ -1356,6 +1021,7 @@ where
                 child,
                 variables,
                 frame_base,
+                type_cache,
             )?;
         }
 
@@ -1371,6 +1037,7 @@ where
         node,
         &mut variables,
         None,
+        type_cache,
     )?;
     Ok(variables)
 }
@@ -1378,6 +1045,7 @@ where
 pub fn find_static_variables<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     device_memory: &DeviceMemory<W>,
+    type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
 ) -> Result<Vec<Variable<W>>, TraceError>
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -1389,6 +1057,7 @@ where
         device_memory: &DeviceMemory<W>,
         node: gimli::EntriesTreeNode<DefaultReader>,
         variables: &mut Vec<Variable<W>>,
+        type_cache: &mut HashMap<DebugInfoOffset, Result<TypeValueTree<W>, TraceError>>,
     ) -> Result<(), TraceError>
     where
         <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -1410,9 +1079,15 @@ where
             | gimli::constants::DW_TAG_const_type
             | gimli::constants::DW_TAG_union_type => return Ok(()),
             gimli::constants::DW_TAG_variable => {
-                if let Some(variable) =
-                    read_variable_entry(dwarf, unit, abbreviations, device_memory, None, entry)?
-                {
+                if let Some(variable) = read_variable_entry(
+                    dwarf,
+                    unit,
+                    abbreviations,
+                    device_memory,
+                    None,
+                    entry,
+                    type_cache,
+                )? {
                     variables.push(variable);
                 }
             }
@@ -1424,7 +1099,15 @@ where
 
         let mut children = node.children();
         while let Some(child) = children.next()? {
-            recursor(dwarf, unit, abbreviations, device_memory, child, variables)?;
+            recursor(
+                dwarf,
+                unit,
+                abbreviations,
+                device_memory,
+                child,
+                variables,
+                type_cache,
+            )?;
         }
 
         Ok(())
@@ -1441,6 +1124,7 @@ where
             device_memory,
             unit_header.entries_tree(&abbreviations, None)?.root()?,
             &mut variables,
+            type_cache,
         )?;
     }
 

@@ -19,7 +19,11 @@
                 {
                     "name": "RUST_BACKTRACE",
                     "value": "1"
-                }
+                },
+                {
+                    "name": "RUST_LOG",
+                    "value": "info"
+                },
             ],
             "args": [
                 "cortex-m",
@@ -28,7 +32,7 @@
             ],
             "preLaunchTask": "rust: cargo build",
             "console": "integratedTerminal",
-        }
+        },
         {
             "name": "(Windows) Launch with probe",
             "type": "cppvsdbg",
@@ -44,7 +48,11 @@
                 {
                     "name": "RUST_BACKTRACE",
                     "value": "1"
-                }
+                },
+                {
+                    "name": "RUST_LOG",
+                    "value": "info"
+                },
             ],
             "args": [
                 "probe",
