@@ -1,4 +1,4 @@
-use gimli::DwAte;
+use gimli::{DebugInfoOffset, DwAte};
 
 #[derive(Debug, Clone, Default)]
 pub struct VariableType {
@@ -15,7 +15,11 @@ pub enum Archetype {
     /// For example: the vtable of an object's Debug impl.
     ObjectMemberPointer,
     BaseType(DwAte),
-    Pointer,
+    /// A pointer that points at an object.
+    ///
+    /// The type is not directly encoded in the tree because linked lists exists.
+    /// We need to catch that to avoid recursions of linked lists.
+    Pointer(DebugInfoOffset),
     Array,
     TaggedUnion,
     TaggedUnionVariant,

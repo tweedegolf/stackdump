@@ -27,7 +27,7 @@ fn render_unknown<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) 
         | Archetype::Class
         | Archetype::ObjectMemberPointer => render_object(type_value_node),
         Archetype::BaseType(_) => render_base_type(type_value_node),
-        Archetype::Pointer => render_pointer(type_value_node),
+        Archetype::Pointer(_) => render_pointer(type_value_node),
         Archetype::Array => render_array(type_value_node),
         Archetype::Enumeration => render_enumeration(type_value_node),
         Archetype::Enumerator | Archetype::TaggedUnionVariant => {

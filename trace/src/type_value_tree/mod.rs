@@ -50,6 +50,8 @@ pub enum VariableDataError {
     },
     #[error("Pointer data is invalid")]
     InvalidPointerData,
+    #[error("nullptr")]
+    NullPointer,
     #[error("Some memory could not be read: {0}")]
     MemoryReadError(#[from] MemoryReadError),
     #[error("Data not available")]

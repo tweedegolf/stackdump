@@ -20,11 +20,12 @@ mod gimli_extensions;
 pub mod platform;
 mod render_colors;
 pub mod type_value_tree;
+mod variables;
 
 type DefaultReader = EndianReader<RunTimeEndian, Rc<[u8]>>;
 
 /// A source code location
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Location {
     /// The file path of the piece of code
     pub file: Option<String>,
