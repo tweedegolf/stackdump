@@ -13,6 +13,6 @@ description = "Crate for capturing stack dumps of embedded devices with a debugg
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-probe-rs = { git = "https://github.com/probe-rs/probe-rs" }
+probe-rs = { git = "https://github.com/probe-rs/probe-rs", rev = "2fa97dc" }
 stackdump-core = { version = "0.1.3", path = "../core", default-features = false }
 

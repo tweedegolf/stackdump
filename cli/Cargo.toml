@@ -21,4 +21,4 @@ simple_logger = "2.1.0"
 log = "0.4.14"
 termsize = "0.1"
 colored = "2"
-probe-rs = { git = "https://github.com/probe-rs/probe-rs" }
+probe-rs = { git = "https://github.com/probe-rs/probe-rs", rev = "2fa97dc" }

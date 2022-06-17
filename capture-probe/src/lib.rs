@@ -15,7 +15,7 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
         let mut register_data = Vec::new();
         let registers = self.0.get_mut().registers();
 
-        for register in registers.registers() {
+        for register in registers.platform_registers() {
             register_data.push(self.0.get_mut().read_core_reg(register)?)
         }
 
