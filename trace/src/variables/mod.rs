@@ -313,8 +313,7 @@ fn build_type_value_tree<W: funty::Integral>(
         tag => Err(TraceError::TagNotImplemented {
             tag_name: tag.to_string(),
             entry_debug_info_offset: entry.offset().to_debug_info_offset(&unit.header).unwrap().0,
-        })
-        .unwrap(),
+        }),
     };
 
     type_cache
@@ -387,7 +386,7 @@ fn evaluate_location<W: funty::Integral>(
                 let value = device_memory.register(register)?;
                 let value = match base_type.0 {
                     0 => gimli::Value::Generic(value.as_u64()),
-                    _ => todo!("Other types than generic haven't been implemented yet"),
+                    val => return Err(TraceError::OperationNotImplemented { operation: format!("Other types than generic haven't been implemented yet. base_type value: {val}"), file: file!(), line: line!() } ),
                 };
                 result = location_evaluation.resume_with_register(value)?;
             }
@@ -469,7 +468,7 @@ where
         gimli::Location::ImplicitPointer {
             value: _,
             byte_offset: _,
-        } => todo!("`ImplicitPointer` location not yet supported"),
+        } => return Err(VariableDataError::OperationNotImplemented { operation: "`ImplicitPointer` location not yet supported".into(), file: file!(), line: line!() }),
     };
 
     // The piece can also specify offsets and a size, so adapt what we've just read to that

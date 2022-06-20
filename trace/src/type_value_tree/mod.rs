@@ -64,4 +64,10 @@ pub enum VariableDataError {
     UnimplementedLocationEvaluationStep(String),
     #[error("Unknown")]
     Unknown,
+    #[error("An operation is not implemented yet. Please open an issue at 'https://github.com/tweedegolf/stackdump': @ {file}:{line} => '{0}'")]
+    OperationNotImplemented {
+        operation: String,
+        file: &'static str,
+        line: u32,
+    }
 }
