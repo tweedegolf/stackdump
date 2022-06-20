@@ -61,7 +61,11 @@ impl<'a, 'probe> MemoryRegion for StackdumpCapturer<'a, 'probe> {
         let mut buffer = vec![0; address_range.clone().count()];
 
         // Truncating to u32 is alright because probe-rs only supports 32-bit devices
-        match self.0.borrow_mut().read(address_range.start as _, &mut buffer) {
+        match self
+            .0
+            .borrow_mut()
+            .read(address_range.start as _, &mut buffer)
+        {
             Ok(_) => Ok(Some(buffer)),
             Err(e) => Err(MemoryReadError(Rc::new(e))),
         }

@@ -1,5 +1,5 @@
 use crate::Arguments;
-use probe_rs::{config::TargetSelector, DebugProbeSelector, Probe, Session, Architecture};
+use probe_rs::{config::TargetSelector, Architecture, DebugProbeSelector, Probe, Session};
 use stackdump_capture_probe::StackdumpCapturer;
 use stackdump_trace::{
     platform::cortex_m::CortexMPlatform, stackdump_core::device_memory::DeviceMemory,
@@ -33,7 +33,7 @@ pub(crate) fn trace_probe(
     device_memory.add_register_data(stackcapturer.capture_core_registers()?);
 
     // TODO on master
-    // if fpu_supported { 
+    // if fpu_supported {
     //     if let Some(fpu_registers) = stackcapturer.capture_fpu_registers()? {
     //         device_memory.add_register_data(fpu_registers);
     //     }
