@@ -1,5 +1,5 @@
 use crate::Arguments;
-use probe_rs::{config::TargetSelector, DebugProbeSelector, Permissions, Probe, Session};
+use probe_rs::{config::TargetSelector, Architecture, DebugProbeSelector, Probe, Session};
 use stackdump_capture_probe::StackdumpCapturer;
 use stackdump_trace::{
     platform::cortex_m::CortexMPlatform, stackdump_core::device_memory::DeviceMemory,
@@ -16,13 +16,15 @@ pub(crate) fn trace_probe(
     let elf_data = std::fs::read(elf_file)?;
 
     let mut session = match probe_selector {
-        Some(selector) => Probe::open(selector)?.attach(target_selector, Permissions::default())?,
-        None => Session::auto_attach(target_selector, Permissions::default())?,
+        Some(selector) => Probe::open(selector)?.attach(target_selector)?,
+        None => Session::auto_attach(target_selector)?,
     };
     let mut core = session.core(core.unwrap_or(0))?;
 
-    let core_type = core.core_type();
-    let fpu_supported = core.fpu_support()?;
+    // TODO on master: Change this to use the core_type
+    let core_type = core.architecture();
+    // TODO on master
+    // let fpu_supported = core.fpu_support()?;
     core.halt(Duration::from_secs(2))?;
 
     let mut stackcapturer = StackdumpCapturer::new(&mut core);
@@ -30,15 +32,16 @@ pub(crate) fn trace_probe(
     let mut device_memory = DeviceMemory::new();
     device_memory.add_register_data(stackcapturer.capture_core_registers()?);
 
-    if fpu_supported {
-        if let Some(fpu_registers) = stackcapturer.capture_fpu_registers()? {
-            device_memory.add_register_data(fpu_registers);
-        }
-    }
+    // TODO on master
+    // if fpu_supported {
+    //     if let Some(fpu_registers) = stackcapturer.capture_fpu_registers()? {
+    //         device_memory.add_register_data(fpu_registers);
+    //     }
+    // }
 
     device_memory.add_memory_region(stackcapturer);
 
-    if core_type.is_cortex_m() {
+    if matches!(core_type, Architecture::Arm) {
         let frames = stackdump_trace::platform::trace::<CortexMPlatform>(device_memory, &elf_data)?;
         crate::print_frames(frames, args);
     } else {
