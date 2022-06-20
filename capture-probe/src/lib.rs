@@ -15,7 +15,7 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
         let mut register_data = Vec::new();
         let registers = self.0.get_mut().registers();
 
-        for register in registers.platform_registers() {
+        for register in registers.registers() {
             register_data.push(self.0.get_mut().read_core_reg(register)?)
         }
 
@@ -27,29 +27,30 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
         Ok(VecRegisterData::new(starting_register, register_data))
     }
 
-    pub fn capture_fpu_registers(
-        &mut self,
-    ) -> Result<Option<VecRegisterData<u32>>, probe_rs::Error> {
-        let registers = self.0.get_mut().registers();
+    // Available on probe-rs master:
+    // pub fn capture_fpu_registers(
+    //     &mut self,
+    // ) -> Result<Option<VecRegisterData<u32>>, probe_rs::Error> {
+    //     let registers = self.0.get_mut().registers();
 
-        match registers.fpu_registers() {
-            Some(fpu_registers) => {
-                let mut register_data = Vec::new();
+    //     match registers.fpu_registers() {
+    //         Some(fpu_registers) => {
+    //             let mut register_data = Vec::new();
 
-                for register in fpu_registers {
-                    register_data.push(self.0.get_mut().read_core_reg(register)?)
-                }
+    //             for register in fpu_registers {
+    //                 register_data.push(self.0.get_mut().read_core_reg(register)?)
+    //             }
 
-                let starting_register = match self.0.get_mut().architecture() {
-                    probe_rs::Architecture::Arm => stackdump_core::gimli::Arm::S0,
-                    probe_rs::Architecture::Riscv => stackdump_core::gimli::RiscV::F0,
-                };
+    //             let starting_register = match self.0.get_mut().architecture() {
+    //                 probe_rs::Architecture::Arm => stackdump_core::gimli::Arm::S0,
+    //                 probe_rs::Architecture::Riscv => stackdump_core::gimli::RiscV::F0,
+    //             };
 
-                Ok(Some(VecRegisterData::new(starting_register, register_data)))
-            }
-            None => Ok(None),
-        }
-    }
+    //             Ok(Some(VecRegisterData::new(starting_register, register_data)))
+    //         }
+    //         None => Ok(None),
+    //     }
+    // }
 }
 
 impl<'a, 'probe> MemoryRegion for StackdumpCapturer<'a, 'probe> {
@@ -60,7 +61,7 @@ impl<'a, 'probe> MemoryRegion for StackdumpCapturer<'a, 'probe> {
         let mut buffer = vec![0; address_range.clone().count()];
 
         // Truncating to u32 is alright because probe-rs only supports 32-bit devices
-        match self.0.borrow_mut().read(address_range.start, &mut buffer) {
+        match self.0.borrow_mut().read(address_range.start as _, &mut buffer) {
             Ok(_) => Ok(Some(buffer)),
             Err(e) => Err(MemoryReadError(Rc::new(e))),
         }
