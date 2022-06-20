@@ -95,6 +95,8 @@ pub fn build_tagged_union<W: funty::Integral>(
             (_, Some(_)) => {
                 return Err(TraceError::OperationNotImplemented {
                     operation: "Reading the discr_list".into(),
+                    file: file!(),
+                    line: line!(),
                 })
             }
             (None, None) => None,

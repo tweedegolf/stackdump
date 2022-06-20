@@ -35,8 +35,12 @@ pub enum TraceError {
         tag_name: String,
         entry_debug_info_offset: usize,
     },
-    #[error("The operation `{operation}` has not been implemented yet")]
-    OperationNotImplemented { operation: String },
+    #[error("An operation is not implemented yet. Please open an issue at 'https://github.com/tweedegolf/stackdump': @ {file}:{line} => '{0}'")]
+    OperationNotImplemented {
+        operation: String,
+        file: &'static str,
+        line: u32,
+    },
     #[error("A child was expected for {entry_tag}, but it was not there")]
     ExpectedChildNotPresent { entry_tag: String },
     #[error("The frame base is not known yet")]
