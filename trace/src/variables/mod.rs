@@ -468,7 +468,13 @@ where
         gimli::Location::ImplicitPointer {
             value: _,
             byte_offset: _,
-        } => return Err(VariableDataError::OperationNotImplemented { operation: "`ImplicitPointer` location not yet supported".into(), file: file!(), line: line!() }),
+        } => {
+            return Err(VariableDataError::OperationNotImplemented {
+                operation: "`ImplicitPointer` location not yet supported".into(),
+                file: file!(),
+                line: line!(),
+            })
+        }
     };
 
     // The piece can also specify offsets and a size, so adapt what we've just read to that

@@ -69,5 +69,5 @@ pub enum VariableDataError {
         operation: String,
         file: &'static str,
         line: u32,
-    }
+    },
 }
