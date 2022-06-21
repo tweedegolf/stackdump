@@ -113,7 +113,6 @@ fn result_main() -> Result<(), Box<dyn Error>> {
 }
 
 pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Arguments) {
-    let terminal_size = termsize::get();
     for (i, frame) in frames.iter().enumerate() {
         print!("{}: ", i);
 
@@ -123,26 +122,32 @@ pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Argu
             args.show_zero_sized_variables,
         );
 
-        for line in frame_text.lines() {
-            if let Some(terminal_size) = terminal_size.as_ref() {
-                if args.max_wrapping_lines != 0
-                    && line.chars().count() > terminal_size.cols as usize * args.max_wrapping_lines
-                {
+        let line_wrapping_options = textwrap::Options::with_termwidth()
+            .wrap_algorithm(textwrap::WrapAlgorithm::new_optimal_fit())
+            .subsequent_indent("      ")
+            .break_words(false)
+            .word_separator(textwrap::WordSeparator::AsciiSpace);
+
+        let max_lines = if args.max_wrapping_lines == 0 {
+            usize::MAX
+        } else {
+            args.max_wrapping_lines
+        };
+
+        for frame_line in frame_text.lines() {
+            let wrapping_lines = textwrap::wrap(frame_line, line_wrapping_options.clone());
+            let wrapping_lines_count = wrapping_lines.len();
+
+            for (wrapping_line_index, wrapping_line) in wrapping_lines.iter().enumerate() {
+                println!("{wrapping_line}");
+
+                if wrapping_line_index == max_lines - 1 {
                     println!(
-                        "{}{}",
-                        truncate(line, terminal_size.cols as usize * args.max_wrapping_lines),
-                        format!(
-                            "... ({} more)",
-                            div_ceil(line.chars().count(), terminal_size.cols as usize)
-                                - args.max_wrapping_lines
-                        )
-                        .dimmed()
+                        "      {}",
+                        format!("... ({} more)", wrapping_lines_count - max_lines).dimmed()
                     );
-                } else {
-                    println!("{}", line);
+                    break;
                 }
-            } else {
-                println!("{}", line);
             }
         }
     }
@@ -172,21 +177,4 @@ fn read_files_into_device_memory(
         }
     }
     Ok((elf_data, device_memory))
-}
-
-fn truncate(s: &str, max_chars: usize) -> &str {
-    match s.char_indices().nth(max_chars) {
-        None => s,
-        Some((idx, _)) => &s[..idx],
-    }
-}
-
-fn div_ceil(lhs: usize, rhs: usize) -> usize {
-    let d = lhs / rhs;
-    let r = lhs % rhs;
-    if r > 0 && rhs > 0 {
-        d + 1
-    } else {
-        d
-    }
 }
