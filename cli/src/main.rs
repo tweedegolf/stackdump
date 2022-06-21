@@ -70,12 +70,16 @@ enum Platform {
 }
 
 fn main() {
+    let start = std::time::Instant::now();
+
     match result_main() {
         Ok(_) => {}
         Err(e) => {
             println!("Error: {e}");
         }
     }
+
+    println!("\nDone in {:.03} seconds", start.elapsed().as_secs_f32());
 }
 
 fn result_main() -> Result<(), Box<dyn Error>> {
