@@ -21,6 +21,8 @@ trees = "0.4.2"
 colored = "2.0.0"
 phf = { version = "0.10", features = ["macros"] }
 funty = { version = "2.0.0", default-features = false }
+strum = "0.24"
+strum_macros = "0.24"
 
 [dev-dependencies]
 simple_logger = "2.1.0"

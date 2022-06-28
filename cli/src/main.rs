@@ -5,12 +5,13 @@ use colored::Colorize;
 use probe::trace_probe;
 use probe_rs::DebugProbeSelector;
 use stackdump_trace::{
+    
     platform::cortex_m::CortexMPlatform,
     stackdump_core::{
         device_memory::DeviceMemory,
         memory_region::{VecMemoryRegion, MEMORY_REGION_IDENTIFIER},
         register_data::{VecRegisterData, REGISTER_DATA_IDENTIFIER},
-    },
+    }, render_colors::Theme,
 };
 use std::{
     error::Error,
@@ -38,6 +39,13 @@ struct Arguments {
         default_value_t = 5
     )]
     max_wrapping_lines: usize,
+    #[clap(
+        short = 't',
+        long,
+        help = "The color theme of the outputted text",
+        default_value_t = Theme::Dark,
+    )]
+    theme: Theme,
 }
 
 #[derive(Subcommand, Debug)]
@@ -120,6 +128,7 @@ pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Argu
             true,
             args.show_inlined_variables,
             args.show_zero_sized_variables,
+            args.theme,
         );
 
         let line_wrapping_options = textwrap::Options::with_termwidth()
