@@ -13,13 +13,14 @@ pub enum Value<ADDR: funty::Integral> {
     String(Vec<u8>, StringFormat),
     Array,
     Enumeration,
+    Typedef,
 }
 
 impl<ADDR: funty::Integral> Display for Value<ADDR> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Unit => write!(f, "()"),
-            Value::Object | Value::Enumeration => write!(f, "{{}}"),
+            Value::Object | Value::Enumeration | Value::Typedef => write!(f, "{{}}"),
             Value::Bool(v) => write!(f, "{v}"),
             Value::Char(v) => write!(f, "{v}"),
             Value::Int(v) => write!(f, "{v}"),

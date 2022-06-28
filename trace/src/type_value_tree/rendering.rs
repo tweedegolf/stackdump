@@ -29,6 +29,7 @@ fn render_unknown<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) 
         Archetype::BaseType(_) => render_base_type(type_value_node),
         Archetype::Pointer(_) => render_pointer(type_value_node),
         Archetype::Array => render_array(type_value_node),
+        Archetype::Typedef => render_typedef(type_value_node),
         Archetype::Enumeration => render_enumeration(type_value_node),
         Archetype::Enumerator | Archetype::TaggedUnionVariant => {
             unreachable!("Should never appear during rendering directly")
@@ -166,6 +167,13 @@ fn render_array<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) ->
     output.as_str().into()
 }
 
+fn render_typedef<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>) -> ColoredString {
+    // When important, the typename has already been printed.
+    // We just really only want to see the value, so we act like a transparent type.
+
+    render_unknown(type_value_node.front().expect("Typedefs have a child"))
+}
+
 fn render_enumeration<ADDR: funty::Integral>(
     type_value_node: &TypeValueNode<ADDR>,
 ) -> ColoredString {
@@ -187,7 +195,7 @@ fn render_enumeration<ADDR: funty::Integral>(
     color_numeric_value(base_value)
 }
 
-/// List with the known transparent types
+/// List with the known transparent types (or types that are effectively transparent)
 ///
 /// The key is the typename before any generics (so, before the '<' character) and the value is the fieldname
 /// the type is transparent to.

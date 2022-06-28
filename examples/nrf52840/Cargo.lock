@@ -153,6 +153,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "funty"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+
+[[package]]
 name = "gimli"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -394,6 +400,7 @@ name = "stackdump-core"
 version = "0.1.3"
 dependencies = [
  "arrayvec",
+ "funty",
  "gimli",
  "serde",
 ]

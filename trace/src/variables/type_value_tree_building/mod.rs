@@ -13,5 +13,8 @@ pub use pointer::build_pointer;
 mod array;
 pub use array::build_array;
 
+mod typedef;
+pub use typedef::build_typedef;
+
 mod enumeration;
 pub use enumeration::build_enumeration;
