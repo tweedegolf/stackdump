@@ -2,17 +2,20 @@
 
 ## Unreleased
 
-### Cli
+## Capture 0.3.0 (28-06-22)
+- *Breaking*: Updated to Core 0.2.0
+
+## Cli 0.1.4 (28-06-22)
 
 - Added colorized output, which can be specified with the `-t` option
 - Added the ability to capture and trace from a running device using probe-rs
 
-### Capture-probe
+## Capture-probe 0.1.0 (28-06-22)
 
 - Created an adaptor for letting a probe-rs core be used as MemoryRegion
 - Added functions to capture the registers via probe-rs
 
-### Trace
+## Trace 0.2.0 (28-06-22)
 
 - *Breaking*: Big refactor to make the type decoding and value reading be structured instead of it all being strings
 - *Breaking*: Tracing has been made crossplatform with an implementation for Cortex-M
@@ -24,7 +27,7 @@
 - Subroutines now display a `_` instead of an `Unknown` error
 - Strings longer than 64kb are no longer read to improve performance
 
-### Core
+## Core 0.2.0 (28-06-22)
 
 - *Breaking*: Simplified the MemoryRegion trait and made it fallible
 - *Breaking*: Simplified the RegisterData trait
