@@ -16,6 +16,7 @@
 
 - *Breaking*: Big refactor to make the type decoding and value reading be structured instead of it all being strings
 - *Breaking*: Tracing has been made crossplatform with an implementation for Cortex-M
+- *Breaking*: Added new archetype: `typedef`
 - Added reading capability for tagged unions (fancy Rust enums)
 - Added colorized output
 - Made it so that transparent types can be added to lessen the clutter in the trace
