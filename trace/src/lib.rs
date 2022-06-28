@@ -1,14 +1,11 @@
 #![doc = include_str!("../README.md")]
 // #![warn(missing_docs)]
 
+use render_colors::{Theme, ThemeColors};
 pub use stackdump_core;
 
-use crate::{
-    render_colors::dark::{color_function, color_info, color_url},
-    type_value_tree::variable_type::Archetype,
-};
+use crate::type_value_tree::variable_type::Archetype;
 use gimli::{EndianReader, EvaluationResult, Piece, RunTimeEndian};
-use render_colors::dark::{color_type_name, color_variable_name};
 use std::{
     fmt::{Debug, Display},
     rc::Rc,
@@ -18,7 +15,7 @@ use type_value_tree::{rendering::render_type_value_tree, TypeValueTree};
 pub mod error;
 mod gimli_extensions;
 pub mod platform;
-mod render_colors;
+pub mod render_colors;
 pub mod type_value_tree;
 mod variables;
 
@@ -76,6 +73,7 @@ impl<ADDR: funty::Integral> Frame<ADDR> {
         show_parameters: bool,
         show_inlined_vars: bool,
         show_zero_sized_vars: bool,
+        theme: Theme,
     ) -> String {
         use std::fmt::Write;
 
@@ -84,14 +82,14 @@ impl<ADDR: funty::Integral> Frame<ADDR> {
         writeln!(
             display,
             "{} ({})",
-            color_function(&self.function),
-            color_info(&self.frame_type)
+            theme.color_function(&self.function),
+            theme.color_info(&self.frame_type)
         )
         .unwrap();
 
         let location_text = self.location.to_string();
         if !location_text.is_empty() {
-            writeln!(display, "  at {}", color_url(location_text)).unwrap();
+            writeln!(display, "  at {}", theme.color_url(location_text)).unwrap();
         }
 
         let filtered_variables = self.variables.iter().filter(|v| {
@@ -104,17 +102,11 @@ impl<ADDR: funty::Integral> Frame<ADDR> {
         if filtered_variables.clone().count() > 0 {
             writeln!(display, "  variables:").unwrap();
             for variable in filtered_variables {
-                write!(display, "    {}", variable).unwrap();
+                write!(display, "    {}", variable.display(theme)).unwrap();
             }
         }
 
         display
-    }
-}
-
-impl<ADDR: funty::Integral> Display for Frame<ADDR> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.display(true, false, false))
     }
 }
 
@@ -157,25 +149,24 @@ pub struct Variable<ADDR: funty::Integral> {
     pub location: Location,
 }
 
-impl<ADDR: funty::Integral> Display for Variable<ADDR> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<ADDR: funty::Integral> Variable<ADDR> {
+    pub fn display(&self, theme: Theme) -> String {
         let mut kind_text = self.kind.to_string();
         if !kind_text.is_empty() {
-            kind_text = color_info(format!("({}) ", kind_text)).to_string();
+            kind_text = theme.color_info(format!("({}) ", kind_text)).to_string();
         }
 
         let mut location_text = self.location.to_string();
         if !location_text.is_empty() {
-            location_text = format!("at {}", color_url(location_text));
+            location_text = format!("at {}", theme.color_url(location_text));
         }
 
-        writeln!(
-            f,
+        format!(
             "{}{}: {} = {} ({})",
             kind_text,
-            color_variable_name(&self.name),
-            color_type_name(&self.type_value.root().data().variable_type.name),
-            render_type_value_tree(&self.type_value),
+            theme.color_variable_name(&self.name),
+            theme.color_type_name(&self.type_value.root().data().variable_type.name),
+            render_type_value_tree(&self.type_value, theme),
             location_text,
         )
     }
