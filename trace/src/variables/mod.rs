@@ -828,7 +828,7 @@ fn read_variable_data<W: funty::Integral>(
                 device_memory,
                 type_cache,
             );
-        },
+        }
         Archetype::Enumerator => {
             // Ignore, we don't have to do anything
         }
