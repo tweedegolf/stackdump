@@ -15,5 +15,5 @@ description = "Crate for capturing stack dumps of embedded devices with a debugg
 [dependencies]
 # probe-rs = { git = "https://github.com/probe-rs/probe-rs", rev = "2fa97dc" }
 probe-rs = "0.12"
-stackdump-core = { version = "0.1.3", path = "../core", default-features = false }
+stackdump-core = { version = "0.2.0", path = "../core", default-features = false }
 
