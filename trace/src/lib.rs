@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 // #![warn(missing_docs)]
 
-use render_colors::{ThemeColors, Theme};
+use render_colors::{Theme, ThemeColors};
 pub use stackdump_core;
 
 use crate::type_value_tree::variable_type::Archetype;

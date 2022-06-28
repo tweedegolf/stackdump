@@ -1,5 +1,8 @@
 use super::{value::Value, variable_type::Archetype, TypeValueNode, TypeValueTree};
-use crate::{render_colors::{Theme, ThemeColors}, type_value_tree::VariableDataError};
+use crate::{
+    render_colors::{Theme, ThemeColors},
+    type_value_tree::VariableDataError,
+};
 use colored::ColoredString;
 use phf::phf_map;
 
@@ -108,7 +111,9 @@ fn render_object<ADDR: funty::Integral>(
 
     let mut output = String::new();
 
-    output += &theme.color_type_name(&type_value_node.data().variable_type.name).to_string();
+    output += &theme
+        .color_type_name(&type_value_node.data().variable_type.name)
+        .to_string();
 
     output.push_str(" { ");
 
@@ -139,7 +144,10 @@ fn render_base_type<ADDR: funty::Integral>(
     theme.color_numeric_value(type_value_node.data().variable_value.as_ref().unwrap())
 }
 
-fn render_pointer<ADDR: funty::Integral>(type_value_node: &TypeValueNode<ADDR>, theme: Theme) -> ColoredString {
+fn render_pointer<ADDR: funty::Integral>(
+    type_value_node: &TypeValueNode<ADDR>,
+    theme: Theme,
+) -> ColoredString {
     let pointer_address = match type_value_node.data().variable_value.as_ref().unwrap() {
         super::value::Value::Address(addr) => addr,
         _ => unreachable!(),
@@ -184,7 +192,10 @@ fn render_typedef<ADDR: funty::Integral>(
     // When important, the typename has already been printed.
     // We just really only want to see the value, so we act like a transparent type.
 
-    render_unknown(type_value_node.front().expect("Typedefs have a child"), theme)
+    render_unknown(
+        type_value_node.front().expect("Typedefs have a child"),
+        theme,
+    )
 }
 
 fn render_enumeration<ADDR: funty::Integral>(

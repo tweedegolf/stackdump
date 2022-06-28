@@ -5,13 +5,13 @@ use colored::Colorize;
 use probe::trace_probe;
 use probe_rs::DebugProbeSelector;
 use stackdump_trace::{
-    
     platform::cortex_m::CortexMPlatform,
+    render_colors::Theme,
     stackdump_core::{
         device_memory::DeviceMemory,
         memory_region::{VecMemoryRegion, MEMORY_REGION_IDENTIFIER},
         register_data::{VecRegisterData, REGISTER_DATA_IDENTIFIER},
-    }, render_colors::Theme,
+    },
 };
 use std::{
     error::Error,

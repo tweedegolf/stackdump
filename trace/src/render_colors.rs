@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use colored::{ColoredString, Colorize};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, strum_macros::Display, strum_macros::EnumString)]
 pub enum Theme {

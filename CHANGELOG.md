@@ -4,7 +4,7 @@
 
 ### Cli
 
-- Added colorized output
+- Added colorized output, which can be specified with the `-t` option
 - Added the ability to capture and trace from a running device using probe-rs
 
 ### Capture-probe
@@ -18,7 +18,7 @@
 - *Breaking*: Tracing has been made crossplatform with an implementation for Cortex-M
 - *Breaking*: Added new archetype: `typedef`
 - Added reading capability for tagged unions (fancy Rust enums)
-- Added colorized output
+- Added color theme system for outputs
 - Made it so that transparent types can be added to lessen the clutter in the trace
 - Object member pointers (objects with the `DW_AT_containing_type` attribute) are now detected an not displayed by default. This hides all of the vtables.
 - Subroutines now display a `_` instead of an `Unknown` error
