@@ -15,6 +15,7 @@ pub enum Archetype {
     /// For example: the vtable of an object's Debug impl.
     ObjectMemberPointer,
     BaseType(DwAte),
+    Typedef,
     /// A pointer that points at an object.
     ///
     /// The type is not directly encoded in the tree because linked lists exists.

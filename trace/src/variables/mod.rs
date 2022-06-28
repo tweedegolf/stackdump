@@ -296,6 +296,9 @@ fn build_type_value_tree<W: funty::Integral>(
         gimli::constants::DW_TAG_array_type => {
             type_value_tree_building::build_array(dwarf, unit, abbreviations, node, type_cache)
         }
+        gimli::constants::DW_TAG_typedef => {
+            type_value_tree_building::build_typedef(dwarf, unit, abbreviations, node, type_cache)
+        }
         gimli::constants::DW_TAG_enumeration_type => type_value_tree_building::build_enumeration(
             dwarf,
             unit,
@@ -815,6 +818,17 @@ fn read_variable_data<W: funty::Integral>(
                 type_cache,
             );
         }
+        Archetype::Typedef => {
+            variable.data_mut().variable_value = Ok(Value::Typedef);
+
+            // The first child of the enumeration is the base integer. We only have to read that one.
+            read_variable_data(
+                variable.front_mut().expect("Typedefs have a child"),
+                data,
+                device_memory,
+                type_cache,
+            );
+        },
         Archetype::Enumerator => {
             // Ignore, we don't have to do anything
         }
