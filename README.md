@@ -3,12 +3,13 @@
 A set of crates for capturing and tracing stack dumps.
 See the docs of the respective operations.
 
-| crate   | crates.io                                                                                                         | docs                                                                                               | Readme's                  |
-| ------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------- |
-| Core    | [![crates.io](https://img.shields.io/crates/v/stackdump-core.svg)](https://crates.io/crates/stackdump-core)       | [![Documentation](https://docs.rs/stackdump-core/badge.svg)](https://docs.rs/stackdump-core)       | [link](core/README.md)    |
-| Capture | [![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture) | [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture) | [link](capture/README.md) |
-| Trace   | [![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace)     | [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)     | [link](trace/README.md)   |
-| Cli     | [![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli)         |                                                                                                    | [link](cli/README.md)     |
+| crate         | crates.io                                                                                                                     | docs                                                                                                           | Readme's                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Core          | [![crates.io](https://img.shields.io/crates/v/stackdump-core.svg)](https://crates.io/crates/stackdump-core)                   | [![Documentation](https://docs.rs/stackdump-core/badge.svg)](https://docs.rs/stackdump-core)                   | [link](core/README.md)          |
+| Capture       | [![crates.io](https://img.shields.io/crates/v/stackdump-capture.svg)](https://crates.io/crates/stackdump-capture)             | [![Documentation](https://docs.rs/stackdump-capture/badge.svg)](https://docs.rs/stackdump-capture)             | [link](capture/README.md)       |
+| Capture-probe | [![crates.io](https://img.shields.io/crates/v/stackdump-capture-probe.svg)](https://crates.io/crates/stackdump-capture-probe) | [![Documentation](https://docs.rs/stackdump-capture-probe/badge.svg)](https://docs.rs/stackdump-capture-probe) | [link](capture-probe/README.md) |
+| Trace         | [![crates.io](https://img.shields.io/crates/v/stackdump-trace.svg)](https://crates.io/crates/stackdump-trace)                 | [![Documentation](https://docs.rs/stackdump-trace/badge.svg)](https://docs.rs/stackdump-trace)                 | [link](trace/README.md)         |
+| Cli           | [![crates.io](https://img.shields.io/crates/v/stackdump-cli.svg)](https://crates.io/crates/stackdump-cli)                     |                                                                                                                | [link](cli/README.md)           |
 
 Currently only Cortex M is supported, but PR's are welcome!
 
