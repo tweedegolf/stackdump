@@ -2,8 +2,11 @@
 
 use std::rc::Rc;
 
+use gimli::EvaluationResult;
 use stackdump_core::device_memory::{MemoryReadError, MissingRegisterError};
 use thiserror::Error;
+
+use crate::{DefaultReader, type_value_tree::VariableDataError};
 
 /// The main error type during the tracing procedure
 #[allow(missing_docs)]
@@ -66,6 +69,11 @@ pub enum TraceError {
         pointer_name: String,
         class_value: gimli::DwAddr,
     },
+    #[error("A required step of the location evaluation logic has not been implemented yet: {0:?}")]
+    LocationEvaluationStepNotImplemented(Rc<EvaluationResult<DefaultReader>>),
+    #[error("A variable couldn't be read: {0}")]
+    VariableDataError(#[from]VariableDataError),
+
 }
 
 impl From<std::io::Error> for TraceError {

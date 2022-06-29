@@ -19,7 +19,7 @@ use crate::{
 use bitvec::prelude::*;
 use gimli::{
     Abbreviations, Attribute, AttributeValue, DebugInfoOffset, DebuggingInformationEntry, Dwarf,
-    EntriesTree, EvaluationResult, Piece, Reader, Unit,
+    EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit,
 };
 use stackdump_core::device_memory::DeviceMemory;
 use std::{collections::HashMap, pin::Pin};
@@ -336,7 +336,10 @@ fn evaluate_location<W: funty::Integral>(
     device_memory: &DeviceMemory<W>,
     location: Option<Attribute<DefaultReader>>,
     frame_base: Option<W>,
-) -> Result<VariableLocationResult, TraceError> {
+) -> Result<VariableLocationResult, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     // First, we need to have the actual value
     let location = match location {
         Some(location) => location.value(),
@@ -372,13 +375,39 @@ fn evaluate_location<W: funty::Integral>(
     };
 
     // Turn the expression into an evaluation
-    let mut location_evaluation = location_expression.evaluation(unit.encoding());
+    let result = evaluate_expression(
+        dwarf,
+        unit,
+        device_memory,
+        frame_base,
+        location_expression.evaluation(unit.encoding()),
+    );
 
+    match result {
+        Err(TraceError::LocationEvaluationStepNotImplemented(step)) => {
+            Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(step))
+        }
+        Err(e) => return Err(e),
+        Ok(pieces) if pieces.len() == 0 => Ok(VariableLocationResult::NoLocationFound),
+        Ok(pieces) => Ok(VariableLocationResult::LocationsFound(pieces)),
+    }
+}
+
+fn evaluate_expression<W: funty::Integral>(
+    dwarf: &Dwarf<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
+    device_memory: &DeviceMemory<W>,
+    frame_base: Option<W>,
+    mut evaluation: Evaluation<DefaultReader>,
+) -> Result<Vec<Piece<DefaultReader, usize>>, TraceError>
+where
+    <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
     // Now we need to evaluate everything.
     // DWARF has a stack based instruction set that needs to be executed.
     // Luckily, gimli already implements the bulk of it.
     // The evaluation stops when it requires some memory that we need to provide.
-    let mut result = location_evaluation.evaluate()?;
+    let mut result = evaluation.evaluate()?;
     while result != EvaluationResult::Complete {
         log::trace!("Location evaluation result: {:?}", result);
         match result {
@@ -391,33 +420,47 @@ fn evaluate_location<W: funty::Integral>(
                     0 => gimli::Value::Generic(value.as_u64()),
                     val => return Err(TraceError::OperationNotImplemented { operation: format!("Other types than generic haven't been implemented yet. base_type value: {val}"), file: file!(), line: line!() } ),
                 };
-                result = location_evaluation.resume_with_register(value)?;
+                result = evaluation.resume_with_register(value)?;
             }
             EvaluationResult::RequiresFrameBase if frame_base.is_some() => {
-                result = location_evaluation.resume_with_frame_base(
+                result = evaluation.resume_with_frame_base(
                     frame_base.ok_or(TraceError::UnknownFrameBase)?.as_u64(),
                 )?;
             }
             EvaluationResult::RequiresRelocatedAddress(address) => {
                 // We have no relocations of code
-                result = location_evaluation.resume_with_relocated_address(address)?;
+                result = evaluation.resume_with_relocated_address(address)?;
+            }
+            EvaluationResult::RequiresEntryValue(ex) => {
+                let entry_pieces = dbg!(evaluate_expression(
+                    dwarf,
+                    unit,
+                    device_memory,
+                    frame_base,
+                    ex.evaluation(unit.encoding()),
+                ))?;
+
+                let entry_data = get_variable_data(
+                    device_memory,
+                    W::BITS as u64,
+                    VariableLocationResult::LocationsFound(entry_pieces),
+                )?;
+
+                gimli::Value::Generic(entry_data.load()); // TODO: What should be the endianness of this? Our device or the target device?
+
+                result = evaluation.resume_with_entry_value(gimli::Value::Generic(
+                    entry_data.load::<W>().as_u64(),
+                ))?;
             }
             r => {
-                return Ok(
-                    VariableLocationResult::LocationEvaluationStepNotImplemented(std::rc::Rc::new(
-                        r,
-                    )),
-                )
+                return Err(TraceError::LocationEvaluationStepNotImplemented(
+                    std::rc::Rc::new(r),
+                ))
             }
         }
     }
 
-    let result = location_evaluation.result();
-
-    match result.len() {
-        0 => Ok(VariableLocationResult::NoLocationFound),
-        _ => Ok(VariableLocationResult::LocationsFound(result)),
-    }
+    Ok(evaluation.result())
 }
 
 /// Reads the data of a piece of memory
