@@ -11,7 +11,9 @@ use gimli::{
 };
 use stackdump_core::device_memory::DeviceMemory;
 
-pub(self) const THUMB_BIT: u32 = 1;
+const THUMB_BIT: u32 = 1;
+const EXC_RETURN_MARKER: u32 = 0xFF00_0000;
+const EXC_RETURN_FTYPE_MASK: u32 = 1 << 4;
 
 pub struct CortexMPlatform<'data> {
     debug_frame: DebugFrame<EndianSlice<'data, LittleEndian>>,
@@ -63,7 +65,7 @@ impl<'data> CortexMPlatform<'data> {
             || (!self
                 .text_address_range
                 .contains(device_memory.register_ref(gimli::Arm::PC)?)
-                && device_memory.register(gimli::Arm::LR)? <= 0xFFFF_FFE0))
+                && device_memory.register(gimli::Arm::LR)? < EXC_RETURN_MARKER))
     }
 
     /// Assumes we are at an exception point in the stack unwinding.
@@ -272,31 +274,11 @@ impl<'data> Platform<'data> for CortexMPlatform<'data> {
 
         // Stack is not corrupted, but unwinding is not done
         // Are we returning from an exception? (EXC_RETURN)
-        if device_memory.register(gimli::Arm::LR)? > 0xffff_ffe0 {
+        if device_memory.register(gimli::Arm::LR)? >= EXC_RETURN_MARKER {
             // Yes, so the registers were pushed to the stack and we need to get them back
 
             // Check the value to know if there are fpu registers to read
-            let fpu = match device_memory.register(gimli::Arm::LR)? {
-                0xFFFFFFF1 | 0xFFFFFFF9 | 0xFFFFFFFD => false,
-                0xFFFFFFE1 | 0xFFFFFFE9 | 0xFFFFFFED => true,
-                _ => {
-                    return Ok(UnwindResult::Corrupted {
-                        error_frame: Some(Frame {
-                            function: "Unknown".into(),
-                            location: crate::Location {
-                                file: None,
-                                line: None,
-                                column: None,
-                            },
-                            frame_type: FrameType::Corrupted(format!(
-                                "LR contains invalid EXC_RETURN value {:#10X}",
-                                device_memory.register(gimli::Arm::LR)?
-                            )),
-                            variables: Vec::new(),
-                        }),
-                    });
-                }
-            };
+            let fpu = device_memory.register(gimli::Arm::LR)? & EXC_RETURN_FTYPE_MASK > 0;
 
             if let Some(previous_frame) = previous_frame {
                 previous_frame.frame_type = FrameType::Exception;
