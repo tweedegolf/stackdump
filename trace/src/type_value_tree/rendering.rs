@@ -111,8 +111,7 @@ fn render_object<ADDR: funty::Integral>(
 
     let mut output = String::new();
 
-    output += &theme
-        .color_type_name(&type_value_node.data().variable_type.name);
+    output += &theme.color_type_name(&type_value_node.data().variable_type.name);
 
     output.push_str(" { ");
 
