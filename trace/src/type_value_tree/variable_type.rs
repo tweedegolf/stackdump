@@ -6,7 +6,7 @@ pub struct VariableType {
     pub archetype: Archetype,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Archetype {
     Structure,
     Union,

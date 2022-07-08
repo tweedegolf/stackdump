@@ -91,19 +91,19 @@ impl<'data> CortexMPlatform<'data> {
         }
 
         *device_memory.register_mut(gimli::Arm::R0)? =
-            read_stack_var(&device_memory, current_sp, 0)?;
+            read_stack_var(device_memory, current_sp, 0)?;
         *device_memory.register_mut(gimli::Arm::R1)? =
-            read_stack_var(&device_memory, current_sp, 1)?;
+            read_stack_var(device_memory, current_sp, 1)?;
         *device_memory.register_mut(gimli::Arm::R2)? =
-            read_stack_var(&device_memory, current_sp, 2)?;
+            read_stack_var(device_memory, current_sp, 2)?;
         *device_memory.register_mut(gimli::Arm::R3)? =
-            read_stack_var(&device_memory, current_sp, 3)?;
+            read_stack_var(device_memory, current_sp, 3)?;
         *device_memory.register_mut(gimli::Arm::R12)? =
-            read_stack_var(&device_memory, current_sp, 4)?;
+            read_stack_var(device_memory, current_sp, 4)?;
         *device_memory.register_mut(gimli::Arm::LR)? =
-            read_stack_var(&device_memory, current_sp, 5)?;
+            read_stack_var(device_memory, current_sp, 5)?;
         *device_memory.register_mut(gimli::Arm::PC)? =
-            read_stack_var(&device_memory, current_sp, 6)?;
+            read_stack_var(device_memory, current_sp, 6)?;
         // At stack place 7 is the PSR register, but we don't need that, so we skip it
 
         // Adjust the sp with the size of what we've read
@@ -112,37 +112,37 @@ impl<'data> CortexMPlatform<'data> {
 
         if fpu {
             *device_memory.register_mut(gimli::Arm::D0)? =
-                read_stack_var(&device_memory, current_sp, 8)?;
+                read_stack_var(device_memory, current_sp, 8)?;
             *device_memory.register_mut(gimli::Arm::D1)? =
-                read_stack_var(&device_memory, current_sp, 9)?;
+                read_stack_var(device_memory, current_sp, 9)?;
             *device_memory.register_mut(gimli::Arm::D2)? =
-                read_stack_var(&device_memory, current_sp, 10)?;
+                read_stack_var(device_memory, current_sp, 10)?;
             *device_memory.register_mut(gimli::Arm::D3)? =
-                read_stack_var(&device_memory, current_sp, 11)?;
+                read_stack_var(device_memory, current_sp, 11)?;
             *device_memory.register_mut(gimli::Arm::D4)? =
-                read_stack_var(&device_memory, current_sp, 12)?;
+                read_stack_var(device_memory, current_sp, 12)?;
             *device_memory.register_mut(gimli::Arm::D5)? =
-                read_stack_var(&device_memory, current_sp, 13)?;
+                read_stack_var(device_memory, current_sp, 13)?;
             *device_memory.register_mut(gimli::Arm::D6)? =
-                read_stack_var(&device_memory, current_sp, 14)?;
+                read_stack_var(device_memory, current_sp, 14)?;
             *device_memory.register_mut(gimli::Arm::D7)? =
-                read_stack_var(&device_memory, current_sp, 15)?;
+                read_stack_var(device_memory, current_sp, 15)?;
             *device_memory.register_mut(gimli::Arm::D8)? =
-                read_stack_var(&device_memory, current_sp, 16)?;
+                read_stack_var(device_memory, current_sp, 16)?;
             *device_memory.register_mut(gimli::Arm::D9)? =
-                read_stack_var(&device_memory, current_sp, 17)?;
+                read_stack_var(device_memory, current_sp, 17)?;
             *device_memory.register_mut(gimli::Arm::D10)? =
-                read_stack_var(&device_memory, current_sp, 18)?;
+                read_stack_var(device_memory, current_sp, 18)?;
             *device_memory.register_mut(gimli::Arm::D11)? =
-                read_stack_var(&device_memory, current_sp, 19)?;
+                read_stack_var(device_memory, current_sp, 19)?;
             *device_memory.register_mut(gimli::Arm::D12)? =
-                read_stack_var(&device_memory, current_sp, 20)?;
+                read_stack_var(device_memory, current_sp, 20)?;
             *device_memory.register_mut(gimli::Arm::D13)? =
-                read_stack_var(&device_memory, current_sp, 21)?;
+                read_stack_var(device_memory, current_sp, 21)?;
             *device_memory.register_mut(gimli::Arm::D14)? =
-                read_stack_var(&device_memory, current_sp, 22)?;
+                read_stack_var(device_memory, current_sp, 22)?;
             *device_memory.register_mut(gimli::Arm::D15)? =
-                read_stack_var(&device_memory, current_sp, 23)?;
+                read_stack_var(device_memory, current_sp, 23)?;
             // At stack place 24 is the fpscr register, but we don't need that, so we skip it
 
             // Adjust the sp with the size of what we've read

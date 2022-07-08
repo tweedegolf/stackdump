@@ -258,7 +258,7 @@ fn build_type_value_tree<W: funty::Integral>(
             entry.tag()
         );
 
-        return Ok((*existing_type).clone()?);
+        return (*existing_type).clone();
     }
 
     log::debug!(
@@ -387,8 +387,8 @@ where
         Err(TraceError::LocationEvaluationStepNotImplemented(step)) => {
             Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(step))
         }
-        Err(e) => return Err(e),
-        Ok(pieces) if pieces.len() == 0 => Ok(VariableLocationResult::NoLocationFound),
+        Err(e) => Err(e),
+        Ok(pieces) if pieces.is_empty() => Ok(VariableLocationResult::NoLocationFound),
         Ok(pieces) => Ok(VariableLocationResult::LocationsFound(pieces)),
     }
 }
@@ -1031,6 +1031,7 @@ pub fn find_variables_in_function<W: funty::Integral>(
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
 {
+    #[allow(clippy::too_many_arguments)]
     fn recursor<W: funty::Integral>(
         dwarf: &Dwarf<DefaultReader>,
         unit: &Unit<DefaultReader, usize>,

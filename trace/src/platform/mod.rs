@@ -89,7 +89,7 @@ where
     loop {
         // Get the frames of the current state
         match add_current_frames::<P>(
-            &mut device_memory,
+            &device_memory,
             &addr2line_context,
             &mut frames,
             &mut type_cache,

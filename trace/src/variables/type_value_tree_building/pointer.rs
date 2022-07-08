@@ -67,6 +67,7 @@ pub fn build_pointer<W: funty::Integral>(
     type_cache.insert(entry_die_offset, Ok(type_value_tree.clone()));
 
     // Insert the pointee into the type cache
+    #[allow(clippy::map_entry)] // Can't use the entry api because of the type_cache borrow later
     if !type_cache.contains_key(&pointee_type_die_offset) {
         let pointee_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry).map(
             |mut type_tree| {

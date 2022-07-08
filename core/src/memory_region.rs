@@ -43,7 +43,7 @@ pub trait MemoryRegion {
 }
 
 /// A memory region that is backed by a stack allocated array
-#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct ArrayMemoryRegion<const SIZE: usize> {
     start_address: u64,
     data: ArrayVec<u8, SIZE>,
@@ -175,7 +175,7 @@ impl<const SIZE: usize> FromIterator<u8> for ArrayMemoryRegion<SIZE> {
 
 /// A memory region that is backed by a stack allocated array
 #[cfg(feature = "std")]
-#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct VecMemoryRegion {
     start_address: u64,
     data: Vec<u8>,
@@ -307,7 +307,7 @@ impl FromIterator<u8> for VecMemoryRegion {
 }
 
 /// A memory region that is backed by a slice
-#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct SliceMemoryRegion<'a> {
     data: &'a [u8],
 }
