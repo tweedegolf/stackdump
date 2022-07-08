@@ -25,7 +25,7 @@ pub trait RegisterData<RB: funty::Integral>: Debug {
 /// A collection of registers, backed by a stack allocated array.
 ///
 /// SIZE is the maximum amount of registers this collection can hold.
-#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct ArrayRegisterData<const SIZE: usize, RB> {
     /// The DWARF register number of the first register
     starting_register_number: u16,
@@ -150,7 +150,7 @@ where
 
 /// A collection of registers, backed by a vec.
 #[cfg(feature = "std")]
-#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct VecRegisterData<RB> {
     /// The DWARF register number of the first register
     starting_register_number: u16,

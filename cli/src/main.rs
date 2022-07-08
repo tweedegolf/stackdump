@@ -113,7 +113,7 @@ fn result_main() -> Result<(), Box<dyn Error>> {
             chip,
             core,
         } => {
-            trace_probe(&elf_file, probe.clone(), chip.into(), *core, &args)?;
+            trace_probe(elf_file, probe.clone(), chip.into(), *core, &args)?;
         }
     }
 
