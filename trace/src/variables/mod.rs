@@ -432,13 +432,13 @@ where
                 result = evaluation.resume_with_relocated_address(address)?;
             }
             EvaluationResult::RequiresEntryValue(ex) => {
-                let entry_pieces = dbg!(evaluate_expression(
+                let entry_pieces = evaluate_expression(
                     dwarf,
                     unit,
                     device_memory,
                     frame_base,
                     ex.evaluation(unit.encoding()),
-                ))?;
+                )?;
 
                 let entry_data = get_variable_data(
                     device_memory,
@@ -446,10 +446,8 @@ where
                     VariableLocationResult::LocationsFound(entry_pieces),
                 )?;
 
-                gimli::Value::Generic(entry_data.load()); // TODO: What should be the endianness of this? Our device or the target device?
-
                 result = evaluation.resume_with_entry_value(gimli::Value::Generic(
-                    entry_data.load::<W>().as_u64(),
+                    entry_data.load_le::<W>().as_u64(), // TODO: What should be the endianness of this? Our device or the target device?
                 ))?;
             }
             r => {
