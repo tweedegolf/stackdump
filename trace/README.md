@@ -24,9 +24,15 @@ If you want to add a target, then please discuss and create an issue or PR.
 In this case we have a cortex m target with FPU.
 A dump has been made with the two register captures first and then the stack capture.
 
-```rust,ignore
-let dump: Vec<u8> = // Get your dump from somewhere
-let elf: Vec<u8> = // Read your elf file
+```rust,no_run
+# use stackdump_core::device_memory::DeviceMemory;
+# use stackdump_core::register_data::VecRegisterData;
+# use stackdump_core::memory_region::VecMemoryRegion;
+# use stackdump_trace::platform::cortex_m::CortexMPlatform;
+# use stackdump_trace::render_colors::Theme;
+
+let dump: Vec<u8> = todo!(); // Get your dump from somewhere
+let elf: Vec<u8> = todo!(); // Read your elf file
 
 let mut dump_iter = dump.iter().copied();
 
@@ -36,9 +42,10 @@ device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
 device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter));
 device_memory.add_memory_region(VecMemoryRegion::from_iter(&mut dump_iter));
 
-let frames = cortex_m::trace(device_memory, &elf).unwrap();
+let frames = stackdump_trace::platform::trace::<CortexMPlatform>(device_memory, &elf).unwrap();
+
 for (i, frame) in frames.iter().enumerate() {
-    println!("{}: {}", i, frame);
+    println!("{}: {}", i, frame.display(true, false, false, Theme::Dark));
 }
 ```
 
