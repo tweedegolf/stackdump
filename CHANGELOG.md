@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## Trace Unreleased
+## Trace 0.2.1 (08-07-22)
 
 - Fixed an issue where stack unwinding would think it reached the end too soon
 - Added back in newlines for variable printouts
