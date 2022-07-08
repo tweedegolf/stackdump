@@ -102,7 +102,7 @@ impl<ADDR: funty::Integral> Frame<ADDR> {
         if filtered_variables.clone().count() > 0 {
             writeln!(display, "  variables:").unwrap();
             for variable in filtered_variables {
-                write!(display, "    {}", variable.display(theme)).unwrap();
+                writeln!(display, "    {}", variable.display(theme)).unwrap();
             }
         }
 
