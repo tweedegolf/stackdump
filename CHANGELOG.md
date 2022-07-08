@@ -6,6 +6,7 @@
 
 - Fixed an issue where stack unwinding would think it reached the end too soon
 - Added back in newlines for variable printouts
+- Can now do the RequiresEntryValue step
 
 ## Capture 0.3.0 (28-06-22)
 - *Breaking*: Updated to Core 0.2.0
