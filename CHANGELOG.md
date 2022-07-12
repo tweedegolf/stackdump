@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## Trace 0.2.2 (12-07-22)
+
+- Fixed an issue where objects were sometimes rendered with white text instead of the correct color
+
 ## Trace 0.2.1 (08-07-22)
 
 - Fixed an issue where stack unwinding would think it reached the end too soon
