@@ -21,4 +21,4 @@ simple_logger = "2.1.0"
 log = "0.4.14"
 textwrap = { version = "0.15", features = ["terminal_size"] }
 colored = "2"
-probe-rs = "0.12"
+probe-rs = "0.13"

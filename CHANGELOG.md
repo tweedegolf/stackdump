@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## Capture-probe
+
+- Updated to probe-rs 0.13
+
+## Cli Unreleased
+
+- Updated to probe-rs 0.13
+
 ## Trace Unreleased
 
 - Implemented th RequiresMemory location step
