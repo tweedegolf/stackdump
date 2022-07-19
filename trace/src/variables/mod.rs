@@ -19,7 +19,7 @@ use crate::{
 use bitvec::prelude::*;
 use gimli::{
     Abbreviations, Attribute, AttributeValue, DebugInfoOffset, DebuggingInformationEntry, Dwarf,
-    EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit,
+    EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit, UnitOffset,
 };
 use stackdump_core::device_memory::DeviceMemory;
 use std::{collections::HashMap, pin::Pin};
@@ -449,6 +449,21 @@ where
                 result = evaluation.resume_with_entry_value(gimli::Value::Generic(
                     entry_data.load_le::<W>().as_u64(), // TODO: What should be the endianness of this? Our device or the target device?
                 ))?;
+            }
+            EvaluationResult::RequiresMemory {
+                address,
+                size,
+                space: None,
+                base_type: UnitOffset(0),
+            } => {
+                // This arm only accepts the generic base_type, so size should always be equal to the size of W
+                assert_eq!(size as u32 * 8, W::BITS);
+
+                let data = device_memory
+                    .read_slice(address..address + size as u64)?
+                    .ok_or(TraceError::MissingMemory(address))?;
+                let value = gimli::Value::Generic(data.as_bits::<Lsb0>().load_le::<W>().as_u64());
+                result = evaluation.resume_with_memory(value)?;
             }
             r => {
                 return Err(TraceError::LocationEvaluationStepNotImplemented(
