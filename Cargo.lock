@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "stackdump-capture-probe"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "probe-rs",
  "stackdump-core",
