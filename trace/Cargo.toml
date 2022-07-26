@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-trace"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
@@ -11,15 +11,15 @@ categories = ["embedded"]
 description = "Crate for tracing stack dumps"
 
 [dependencies]
-addr2line = "0.17.0"
-gimli = "0.26.1"
+addr2line = "0.18"
+gimli = "0.26.2"
 bitvec = "1.0.0"
 stackdump-core = { version = "0.2.0", path = "../core" }
 thiserror = "1.0.30"
 log = "0.4.14"
 trees = "0.4.2"
 colored = "2.0.0"
-phf = { version = "0.10", features = ["macros"] }
+phf = { version = "0.11", features = ["macros"] }
 funty = { version = "2.0.0", default-features = false }
 strum = "0.24"
 strum_macros = "0.24"

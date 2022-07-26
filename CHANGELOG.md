@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-## Capture-probe
+## Capture-probe 0.2.0 (26-07-22)
 
 - Updated to probe-rs 0.13
 
-## Cli Unreleased
+## Cli 0.1.5 (26-07-22)
 
 - Updated to probe-rs 0.13
 
-## Trace Unreleased
+## Trace 0.2.3 (26-07-22)
 
 - Implemented th RequiresMemory location step
 
