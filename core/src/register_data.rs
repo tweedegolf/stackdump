@@ -315,7 +315,14 @@ impl<'a, RB: funty::Integral> Iterator for RegisterDataBytesIterator<'a, RB> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let length = 5 + self.registers.len() * core::mem::size_of::<RB>();
+        (length, Some(length))
+    }
 }
+
+impl<'a, RB: funty::Integral> ExactSizeIterator for RegisterDataBytesIterator<'a, RB> {}
 
 #[cfg(test)]
 mod tests {
@@ -327,5 +334,13 @@ mod tests {
         let copied_data = VecRegisterData::from_iter(data.bytes());
 
         assert_eq!(data, copied_data);
+    }
+
+    #[test]
+    fn iterator_length() {
+        let data = VecRegisterData::new(gimli::Arm::S12, vec![1u32, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+        let iter = data.bytes();
+
+        assert_eq!(iter.len(), iter.count());
     }
 }

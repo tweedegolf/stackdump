@@ -424,7 +424,13 @@ impl<'a> Iterator for MemoryRegionIterator<'a> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (17 + self.data.len(), Some(17 + self.data.len()))
+    }
 }
+
+impl<'a> ExactSizeIterator for MemoryRegionIterator<'a> {}
 
 #[cfg(test)]
 mod tests {
@@ -436,5 +442,12 @@ mod tests {
         let copied_region = VecMemoryRegion::from_iter(region.bytes());
 
         assert_eq!(region, copied_region);
+    }
+
+    #[test]
+    fn iterator_len() {
+        let region = VecMemoryRegion::new(0x2000_0000, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+        let iter = region.bytes();
+        assert_eq!(iter.len(), iter.count());
     }
 }
