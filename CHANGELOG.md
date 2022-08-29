@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## Core 0.2.1 (29-08-22)
+
+- The byte iterators for `MemoryRegion` and `RegisterData` now implement `ExactSizeIterator`.
+
 ## Capture-probe 0.2.0 (26-07-22)
 
 - Updated to probe-rs 0.13
