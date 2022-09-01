@@ -426,7 +426,8 @@ impl<'a> Iterator for MemoryRegionIterator<'a> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (17 + self.data.len(), Some(17 + self.data.len()))
+        let remaining_length = 17 + self.data.len() - self.index;
+        (remaining_length, Some(remaining_length))
     }
 }
 
@@ -448,6 +449,10 @@ mod tests {
     fn iterator_len() {
         let region = VecMemoryRegion::new(0x2000_0000, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
         let iter = region.bytes();
+        assert_eq!(iter.len(), iter.count());
+
+        let mut iter = region.bytes();
+        iter.nth(10).unwrap();
         assert_eq!(iter.len(), iter.count());
     }
 }

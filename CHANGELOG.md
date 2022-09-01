@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## Core 0.2.2 (01-09-22)
+
+- The length of the iterators for `MemoryRegion` and `RegisterData` always returned the original value. Now they return how many elements are left.
+
 ## Core 0.2.1 (29-08-22)
 
 - The byte iterators for `MemoryRegion` and `RegisterData` now implement `ExactSizeIterator`.

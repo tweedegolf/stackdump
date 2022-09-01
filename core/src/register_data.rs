@@ -317,8 +317,8 @@ impl<'a, RB: funty::Integral> Iterator for RegisterDataBytesIterator<'a, RB> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let length = 5 + self.registers.len() * core::mem::size_of::<RB>();
-        (length, Some(length))
+        let remaining_length = 5 + self.registers.len() * core::mem::size_of::<RB>() - self.index;
+        (remaining_length, Some(remaining_length))
     }
 }
 
@@ -341,6 +341,10 @@ mod tests {
         let data = VecRegisterData::new(gimli::Arm::S12, vec![1u32, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
         let iter = data.bytes();
 
+        assert_eq!(iter.len(), iter.count());
+
+        let mut iter = data.bytes();
+        iter.nth(10).unwrap();
         assert_eq!(iter.len(), iter.count());
     }
 }

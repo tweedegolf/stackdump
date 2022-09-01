@@ -14,5 +14,5 @@ description = "Crate for capturing stack dumps of embedded devices with a debugg
 
 [dependencies]
 probe-rs = "0.13"
-stackdump-core = { version = "0.2.0", path = "../core" }
+stackdump-core = { version = "0.2.2", path = "../core" }
 

@@ -38,7 +38,7 @@ pub enum TraceError {
         tag_name: String,
         entry_debug_info_offset: usize,
     },
-    #[error("An operation is not implemented yet. Please open an issue at 'https://github.com/tweedegolf/stackdump': @ {file}:{line} => '{0}'")]
+    #[error("An operation is not implemented yet. Please open an issue at 'https://github.com/tweedegolf/stackdump': @ {file}:{line} => '{operation}'")]
     OperationNotImplemented {
         operation: String,
         file: &'static str,
