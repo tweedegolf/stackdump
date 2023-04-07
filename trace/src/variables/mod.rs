@@ -645,10 +645,7 @@ fn read_base_type<W: funty::Integral>(
     }
 }
 
-/// Gets a string representation of the variable
-///
-/// If it can be read, an Ok with the most literal value format is returned.
-/// If it can not be read, an Err is returned with a user displayable error.
+/// Read some bit data into the value of the give variable. If there is an error, that error will be placed in the value field as well
 fn read_variable_data<W: funty::Integral>(
     mut variable: Pin<&mut TypeValueNode<W>>,
     data: &BitSlice<u8, Lsb0>,
