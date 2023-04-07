@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-cli"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.59"
 license = "MIT OR Apache-2.0"
@@ -14,11 +14,11 @@ description = "Crate for capturing stack dumps"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.1.2", features = ["derive", "color", "suggestions"] }
+clap = { version = "4.2.1", features = ["derive", "color", "suggestions"] }
 stackdump-trace = { version = "0.2.0", path = "../trace" }
-stackdump-capture-probe = { version = "0.2.0", path = "../capture-probe" }
-simple_logger = "2.1.0"
+stackdump-capture-probe = { version = "0.3.0", path = "../capture-probe" }
+simple_logger = "4.1.0"
 log = "0.4.14"
-textwrap = { version = "0.15", features = ["terminal_size"] }
+textwrap = { version = "0.16.0", features = ["terminal_size"] }
 colored = "2"
-probe-rs = "0.13"
+probe-rs = "0.18.0"

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## Capture 0.4.0 (07-04-23)
+
+- *Breaking*: Capturing no longer takes a critical section. I'm now convinced this is not necessary.
+
+## Capture-probe 0.3.0 (07-04-23)
+
+- *Breaking*: Update to probe-rs 0.18
+
+## Cli 0.1.6 (07-04-23)
+
+- Update to probe-rs 0.18
+- Update to clap 4
+
+## Core 0.3.0 (07-04-23)
+
+- *Breaking*: Updated to gimli 0.27.2
+
+## Trace 0.2.4 (07-04-23)
+
+- Updated dependencies
+
 ## Core 0.2.2 (01-09-22)
 
 - The length of the iterators for `MemoryRegion` and `RegisterData` always returned the original value. Now they return how many elements are left.

@@ -8,7 +8,6 @@ use stackdump_core::{memory_region::ArrayMemoryRegion, register_data::ArrayRegis
 pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
     core_registers: &mut ArrayRegisterData<16, u32>,
-    _cs: &bare_metal::CriticalSection,
 ) {
     capture_core_registers(core_registers);
     capture_stack(
@@ -25,7 +24,6 @@ pub fn capture<const SIZE: usize>(
     stack: &mut ArrayMemoryRegion<SIZE>,
     core_registers: &mut ArrayRegisterData<16, u32>,
     fpu_registers: &mut ArrayRegisterData<32, u32>,
-    _cs: &bare_metal::CriticalSection,
 ) {
     capture_core_registers(core_registers);
     capture_fpu_registers(fpu_registers);

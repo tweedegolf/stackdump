@@ -55,7 +55,7 @@ enum Platform {
         #[clap(help = "Path to the elf file with debug info")]
         elf_file: PathBuf,
         #[clap(
-            min_values = 1,
+            num_args = 1..,
             help = "The memory dumps. Must be in the format of the byte iterator in the core crate. Multiple dumps can be put into the file."
         )]
         dumps: Vec<PathBuf>,

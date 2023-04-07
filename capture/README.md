@@ -54,7 +54,7 @@ We need to be able to persist all the data across the reboot.
 If you have a filesystem or something similar, you could write it to there.
 But most embedded systems have got some SRAM so we could keep it in uninitialized memory.
 
-```rust,ignore
+```rust
 use core::mem::MaybeUninit;
 use stackdump_core::memory_region::ArrayMemoryRegion;
 use stackdump_core::register_data::ArrayRegisterData;
@@ -70,7 +70,7 @@ static mut FPU_REGISTERS_CAPTURE: MaybeUninit<ArrayRegisterData<32, u32>> = Mayb
 We also need to be able to detect at bootup if a stackdump has been captured.
 The best way is to have an uninitialized integer present that can have a specific value to indicate the dump has been made.
 
-```rust,ignore
+```rust
 use core::mem::MaybeUninit;
 
 #[link_section = ".uninit"]

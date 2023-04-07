@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-core"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
@@ -13,7 +13,7 @@ description = "Crate for stack dump definitions"
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false, features = ["serde"] }
 serde = { version = "1.0.136", default-features = false, features = ["derive"] }
-gimli = { version = "0.26.1", default-features = false }
+gimli = { version = "0.27.2", default-features = false }
 funty = { version = "2.0.0", default-features = false }
 
 [features]
