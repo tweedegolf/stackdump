@@ -6,6 +6,7 @@ use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion
 use std::collections::HashMap;
 
 pub mod cortex_m;
+pub mod avr;
 
 /// The result of an unwinding procedure
 pub enum UnwindResult<ADDR: funty::Integral> {

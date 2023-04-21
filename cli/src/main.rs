@@ -5,7 +5,7 @@ use colored::Colorize;
 use probe::trace_probe;
 use probe_rs::DebugProbeSelector;
 use stackdump_trace::{
-    platform::cortex_m::CortexMPlatform,
+    platform::{avr::AvrPlatform, cortex_m::CortexMPlatform},
     render_colors::Theme,
     stackdump_core::{
         device_memory::DeviceMemory,
@@ -52,6 +52,16 @@ struct Arguments {
 enum Platform {
     #[clap(about = "Trace from files using Cortex-M as the target")]
     CortexM {
+        #[clap(help = "Path to the elf file with debug info")]
+        elf_file: PathBuf,
+        #[clap(
+            num_args = 1..,
+            help = "The memory dumps. Must be in the format of the byte iterator in the core crate. Multiple dumps can be put into the file."
+        )]
+        dumps: Vec<PathBuf>,
+    },
+    #[clap(about = "Trace from files using AVR as the target")]
+    AVR {
         #[clap(help = "Path to the elf file with debug info")]
         elf_file: PathBuf,
         #[clap(
@@ -107,6 +117,11 @@ fn result_main() -> Result<(), Box<dyn Error>> {
                 stackdump_trace::platform::trace::<CortexMPlatform>(device_memory, &elf_data)?;
             print_frames(frames, &args);
         }
+        Platform::AVR { elf_file, dumps } => {
+            let (elf_data, device_memory) = read_files_into_device_memory(elf_file, dumps)?;
+            let frames = stackdump_trace::platform::trace::<AvrPlatform>(device_memory, &elf_data)?;
+            print_frames(frames, &args);
+        }
         Platform::Probe {
             elf_file,
             probe,
@@ -120,7 +135,7 @@ fn result_main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Arguments) {
+pub(crate) fn print_frames<ADDR: funty::Integral>(frames: Vec<stackdump_trace::Frame<ADDR>>, args: &Arguments) {
     for (i, frame) in frames.iter().enumerate() {
         print!("{}: ", i);
 
@@ -162,17 +177,21 @@ pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Argu
     }
 }
 
-fn read_files_into_device_memory(
+fn read_files_into_device_memory<RB>(
     elf_file: &Path,
     dumps: &[PathBuf],
-) -> Result<(Vec<u8>, DeviceMemory<'static, u32>), Box<dyn Error>> {
+) -> Result<(Vec<u8>, DeviceMemory<'static, RB>), Box<dyn Error>>
+where
+    RB: funty::Integral,
+    RB::Bytes: for<'a> TryFrom<&'a [u8]>,
+{
     let elf_data = std::fs::read(elf_file)?;
     let mut device_memory = DeviceMemory::new();
     for dump_path in dumps {
         let dump_data = std::fs::read(dump_path)?;
-
+        
         let mut dump_iter = dump_data.into_iter().peekable();
-
+        
         while let Some(id) = dump_iter.peek().cloned() {
             match id {
                 MEMORY_REGION_IDENTIFIER => {
@@ -181,7 +200,7 @@ fn read_files_into_device_memory(
                 REGISTER_DATA_IDENTIFIER => {
                     device_memory.add_register_data(VecRegisterData::from_iter(&mut dump_iter))
                 }
-                _ => return Err("Dump data error. Got to an unexpected identifier".into()),
+                _ => return Err(format!("Dump data error. Got to an unexpected identifier: {id}").into()),
             }
         }
     }

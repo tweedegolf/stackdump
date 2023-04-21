@@ -40,6 +40,26 @@ pub trait MemoryRegion {
             Ok(None)
         }
     }
+
+    /// Reads a u16 from the given address if it is present in the region
+    fn read_u16(
+        &self,
+        address: u64,
+        endianness: gimli::RunTimeEndian,
+    ) -> Result<Option<u16>, crate::device_memory::MemoryReadError> {
+        if let Some(slice) = self
+            .read(address..address + 2)?
+            .map(|slice| slice[..].try_into().unwrap())
+        {
+            if gimli::Endianity::is_little_endian(endianness) {
+                Ok(Some(u16::from_le_bytes(slice)))
+            } else {
+                Ok(Some(u16::from_be_bytes(slice)))
+            }
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 /// A memory region that is backed by a stack allocated array

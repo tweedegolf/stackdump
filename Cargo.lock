@@ -828,6 +828,7 @@ version = "0.1.6"
 dependencies = [
  "clap",
  "colored",
+ "funty",
  "log",
  "probe-rs",
  "simple_logger",

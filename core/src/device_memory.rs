@@ -101,6 +101,21 @@ impl<'memory, RB: funty::Integral> DeviceMemory<'memory, RB> {
         Ok(None)
     }
 
+    /// Reads a u16 from the given address if it is present in one of the captured regions present in the device memory
+    pub fn read_u16(
+        &self,
+        address: u64,
+        endianness: gimli::RunTimeEndian,
+    ) -> Result<Option<u16>, MemoryReadError> {
+        for mr in self.memory_regions.iter() {
+            if let Some(v) = mr.read_u16(address, endianness)? {
+                return Ok(Some(v));
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Try to get the value of the given register. Returns an error if the register is not present in any of the register collections.
     pub fn register(&self, register: gimli::Register) -> Result<RB, MissingRegisterError> {
         self.register_data
