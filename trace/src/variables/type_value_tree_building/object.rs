@@ -3,10 +3,7 @@ use crate::{
     get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
-    variables::{
-        build_type_value_tree, get_entry_name, get_entry_type_reference_tree,
-        read_data_member_location,
-    },
+    variables::{build_type_value_tree, get_entry_name, read_data_member_location},
     DefaultReader,
 };
 use gimli::{Abbreviations, DebugInfoOffset, DwTag, Dwarf, Unit};

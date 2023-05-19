@@ -2,7 +2,7 @@ use crate::{
     error::TraceError,
     get_entry_type_reference_tree_recursive,
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
-    variables::{build_type_value_tree, get_entry_name, get_entry_type_reference_tree},
+    variables::{build_type_value_tree, get_entry_name},
     DefaultReader,
 };
 use gimli::{Abbreviations, DebugInfoOffset, Dwarf, Unit};

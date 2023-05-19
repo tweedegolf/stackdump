@@ -7,7 +7,7 @@ use crate::{
         variable_type::{Archetype, VariableType},
         TypeValue, TypeValueTree, VariableDataError,
     },
-    variables::{build_type_value_tree, get_entry_type_reference_tree, read_data_member_location},
+    variables::{build_type_value_tree, read_data_member_location},
     DefaultReader,
 };
 use gimli::{Abbreviations, AttributeValue, DebugInfoOffset, Dwarf, Unit};
