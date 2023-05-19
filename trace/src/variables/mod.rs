@@ -19,7 +19,7 @@ use crate::{
 use bitvec::prelude::*;
 use gimli::{
     Abbreviations, Attribute, AttributeValue, DebugInfoOffset, DebuggingInformationEntry, Dwarf,
-    EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit, UnitOffset,
+    EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit, UnitHeader, UnitOffset,
 };
 use stackdump_core::device_memory::DeviceMemory;
 use std::{collections::HashMap, pin::Pin};
@@ -42,7 +42,7 @@ fn get_entry_name(
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<String, TraceError> {
     // Find the attribute
-    let name_attr = entry.required_attr(unit, gimli::constants::DW_AT_name)?;
+    let name_attr = entry.required_attr(&unit.header, gimli::constants::DW_AT_name)?;
     // Read as a string type
     let attr_string = dwarf.attr_string(unit, name_attr.value())?;
     // Convert to String
@@ -51,12 +51,15 @@ fn get_entry_name(
 
 /// If available, get the EntriesTree of the `DW_AT_abstract_origin` attribute of the given entry
 fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
-    unit: &'unit Unit<DefaultReader, usize>,
+    dwarf: &Dwarf<DefaultReader>,
+    unit_header: &'unit UnitHeader<DefaultReader>,
     abbreviations: &'abbrev Abbreviations,
-    entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, TraceError> {
+    entry: &DebuggingInformationEntry<DefaultReader>,
+) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, GetEntryTreeError> {
     // Find the attribute
-    let abstract_origin_attr = entry.attr(gimli::constants::DW_AT_abstract_origin)?;
+    let abstract_origin_attr = entry
+        .attr(gimli::constants::DW_AT_abstract_origin)
+        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?;
 
     let abstract_origin_attr = match abstract_origin_attr {
         Some(abstract_origin_attr) => abstract_origin_attr,
@@ -64,42 +67,167 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     };
 
     // Check its offset
-    let type_offset = if let AttributeValue::UnitRef(offset) = abstract_origin_attr.value() {
-        Ok(offset)
-    } else {
-        Err(TraceError::WrongAttributeValueType {
-            attribute_name: abstract_origin_attr.name().to_string(),
-            value_type_name: "UnitRef",
-        })
-    }?;
+    match abstract_origin_attr.value() {
+        AttributeValue::UnitRef(offset) => {
+            // Get the entries for the type
+            Ok(Some(
+                unit_header
+                    .entries_tree(abbreviations, Some(offset))
+                    .map_err(|e| GetEntryTreeError::TraceError(e.into()))?,
+            ))
+        }
+        AttributeValue::DebugInfoRef(offset) => {
+            if let Some(offset) = offset.to_unit_offset(unit_header) {
+                return Ok(Some(
+                    unit_header
+                        .entries_tree(abbreviations, Some(offset))
+                        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?,
+                ));
+            }
 
-    // Get the entries for the type
-    Ok(Some(
-        unit.header.entries_tree(abbreviations, Some(type_offset))?,
-    ))
+            // The offset is not in our current compilation unit. Let's see if we can find the correct one
+            let mut units = dwarf.units();
+            while let Ok(Some(unit_header)) = units.next() {
+                if offset.to_unit_offset(&unit_header).is_some() {
+                    // Yes, we've found the unit. We return it so that the caller can recall us with the correct unit.
+                    // We can't use the correct unit ourselves, because the EntriesTree borrows the unit
+                    return Err(GetEntryTreeError::WrongUnit(unit_header));
+                }
+            }
+
+            Err(GetEntryTreeError::TraceError(
+                TraceError::DebugInfoOffsetUnitNotFound {
+                    debug_info_offset: offset.0,
+                },
+            ))
+        }
+        value => Err(GetEntryTreeError::TraceError(
+            TraceError::WrongAttributeValueType {
+                attribute_name: abstract_origin_attr.name().to_string(),
+                expected_type_name: "UnitRef or DebugInfoRef",
+                gotten_value: format!("{:X?}", value),
+            },
+        )),
+    }
 }
 
 /// Get the EntriesTree of the `DW_AT_type` attribute of the given entry
 fn get_entry_type_reference_tree<'abbrev, 'unit>(
-    unit: &'unit Unit<DefaultReader, usize>,
+    dwarf: &Dwarf<DefaultReader>,
+    unit_header: &'unit UnitHeader<DefaultReader, usize>,
     abbreviations: &'abbrev Abbreviations,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
-) -> Result<EntriesTree<'abbrev, 'unit, DefaultReader>, TraceError> {
+) -> Result<EntriesTree<'abbrev, 'unit, DefaultReader>, GetEntryTreeError> {
     // Find the attribute
-    let type_attr = entry.required_attr(unit, gimli::constants::DW_AT_type)?;
+    let type_attr = entry
+        .required_attr(unit_header, gimli::constants::DW_AT_type)
+        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?;
 
     // Check its offset
-    let type_offset = if let AttributeValue::UnitRef(offset) = type_attr.value() {
-        Ok(offset)
-    } else {
-        Err(TraceError::WrongAttributeValueType {
-            attribute_name: type_attr.name().to_string(),
-            value_type_name: "UnitRef",
-        })
-    }?;
+    match type_attr.value() {
+        AttributeValue::UnitRef(offset) => {
+            // Get the entries for the type
+            Ok(unit_header
+                .entries_tree(abbreviations, Some(offset))
+                .map_err(|e| GetEntryTreeError::TraceError(e.into()))?)
+        }
+        AttributeValue::DebugInfoRef(offset) => {
+            if let Some(offset) = offset.to_unit_offset(unit_header) {
+                return Ok(unit_header
+                    .entries_tree(abbreviations, Some(offset))
+                    .map_err(|e| GetEntryTreeError::TraceError(e.into()))?);
+            }
 
-    // Get the entries for the type
-    Ok(unit.header.entries_tree(abbreviations, Some(type_offset))?)
+            // The offset is not in our current compilation unit. Let's see if we can find the correct one
+            let mut units = dwarf.units();
+            while let Ok(Some(unit_header)) = units.next() {
+                if offset.to_unit_offset(&unit_header).is_some() {
+                    // Yes, we've found the unit. We return it so that the caller can recall us with the correct unit.
+                    // We can't use the correct unit ourselves, because the EntriesTree borrows the unit
+                    return Err(GetEntryTreeError::WrongUnit(unit_header));
+                }
+            }
+
+            Err(GetEntryTreeError::TraceError(
+                TraceError::DebugInfoOffsetUnitNotFound {
+                    debug_info_offset: offset.0,
+                },
+            ))
+        }
+        value => Err(GetEntryTreeError::TraceError(
+            TraceError::WrongAttributeValueType {
+                attribute_name: type_attr.name().to_string(),
+                expected_type_name: "UnitRef or DebugInfoRef",
+                gotten_value: format!("{:X?}", value),
+            },
+        )),
+    }
+}
+
+pub(crate) enum GetEntryTreeError {
+    WrongUnit(UnitHeader<DefaultReader>),
+    TraceError(TraceError),
+}
+
+impl GetEntryTreeError {
+    fn as_trace_error(self) -> TraceError {
+        match self {
+            Self::TraceError(e) => e,
+            Self::WrongUnit(_) => TraceError::UnitNotFoundAgain,
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! get_entry_abstract_origin_reference_tree_recursive {
+    ($tree_name:ident = ($dwarf:expr, $unit:expr, $abbreviations:expr, $entry:expr)) => {
+        let mut __unit_header = $unit.header.clone();
+        #[allow(unused_mut)]
+        let mut $tree_name = match crate::variables::get_entry_abstract_origin_reference_tree(
+            $dwarf,
+            &__unit_header,
+            $abbreviations,
+            $entry,
+        ) {
+            Err(crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
+                __unit_header = target_unit;
+                crate::variables::get_entry_abstract_origin_reference_tree(
+                    $dwarf,
+                    &__unit_header,
+                    $abbreviations,
+                    $entry,
+                )
+            }
+            value => value,
+        }
+        .map_err(|e| e.as_trace_error());
+    };
+}
+
+#[macro_export]
+macro_rules! get_entry_type_reference_tree_recursive {
+    ($tree_name:ident = ($dwarf:expr, $unit:expr, $abbreviations:expr, $entry:expr)) => {
+        let mut __unit_header = $unit.header.clone();
+        #[allow(unused_mut)]
+        let mut $tree_name = match crate::variables::get_entry_type_reference_tree(
+            $dwarf,
+            &__unit_header,
+            $abbreviations,
+            $entry,
+        ) {
+            Err(crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
+                __unit_header = target_unit;
+                crate::variables::get_entry_type_reference_tree(
+                    $dwarf,
+                    &__unit_header,
+                    $abbreviations,
+                    $entry,
+                )
+            }
+            value => value,
+        }
+        .map_err(|e| e.as_trace_error());
+    };
 }
 
 fn try_read_frame_base<W: funty::Integral>(
@@ -223,14 +351,14 @@ fn find_entry_location<'unit>(
 
 /// Reads the DW_AT_data_member_location and returns the entry's bit offset
 fn read_data_member_location(
-    unit: &Unit<DefaultReader, usize>,
+    unit_header: &UnitHeader<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<u64, TraceError> {
     // TODO: Sometimes this is not a simple number, but a location expression.
     // As of writing this has not come up, but I can imagine this is the case for C bitfields.
     // It is the offset in bits from the base.
     Ok(entry
-        .required_attr(unit, gimli::constants::DW_AT_data_member_location)?
+        .required_attr(unit_header, gimli::constants::DW_AT_data_member_location)?
         .required_udata_value()?
         * 8)
 }
@@ -251,7 +379,7 @@ fn build_type_value_tree<W: funty::Integral>(
     let entry_die_offset = entry.offset().to_debug_info_offset(&unit.header).unwrap();
 
     if let Some(existing_type) = type_cache.get(&entry_die_offset) {
-        log::debug!(
+        log::trace!(
             "Using cached type value tree for {:?} at {:X} (tag: {})",
             get_entry_name(dwarf, unit, entry),
             entry_die_offset.0,
@@ -261,7 +389,7 @@ fn build_type_value_tree<W: funty::Integral>(
         return (*existing_type).clone();
     }
 
-    log::debug!(
+    log::trace!(
         "Building type value tree for {:?} at {:X} (tag: {})",
         get_entry_name(dwarf, unit, entry),
         entry_die_offset.0,
@@ -457,11 +585,18 @@ where
                 base_type: UnitOffset(0),
             } => {
                 // This arm only accepts the generic base_type, so size should always be equal to the size of W
-                assert_eq!(size as u32 * 8, W::BITS);
+                // assert_eq!(size as u32 * 8, W::BITS);
 
-                let data = device_memory
+                let mut data = device_memory
                     .read_slice(address..address + size as u64)?
                     .ok_or(TraceError::MissingMemory(address))?;
+
+                data.extend(
+                    std::iter::once(0)
+                        .cycle()
+                        .take((W::BITS / 8) as usize - size as usize),
+                );
+
                 let value = gimli::Value::Generic(data.as_bits::<Lsb0>().load_le::<W>().as_u64());
                 result = evaluation.resume_with_memory(value)?;
             }
@@ -907,8 +1042,11 @@ fn read_variable_entry<W: funty::Integral>(
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
 {
-    let mut abstract_origin_tree =
-        get_entry_abstract_origin_reference_tree(unit, abbreviations, entry)?;
+    get_entry_abstract_origin_reference_tree_recursive!(
+        abstract_origin_tree = (dwarf, unit, abbreviations, entry)
+    );
+    let mut abstract_origin_tree = abstract_origin_tree?;
+
     let abstract_origin_node = abstract_origin_tree
         .as_mut()
         .and_then(|tree| tree.root().ok());
@@ -929,19 +1067,24 @@ where
     }
 
     // Get the type of the variable
-    let variable_type_value_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
-        .and_then(|mut type_tree| {
-            let type_root = type_tree.root()?;
-            build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
-        });
+    get_entry_type_reference_tree_recursive!(
+        variable_type_value_tree = (dwarf, unit, abbreviations, entry)
+    );
+
+    let variable_type_value_tree = variable_type_value_tree.and_then(|mut type_tree| {
+        let type_root = type_tree.root()?;
+        build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
+    });
 
     // Alternatively, get the type from the abstract origin
     let variable_type_value_tree = match (variable_type_value_tree, abstract_origin_entry) {
-        (Err(_), Some(entry)) => get_entry_type_reference_tree(unit, abbreviations, entry)
-            .and_then(|mut type_tree| {
+        (Err(_), Some(entry)) => {
+            get_entry_type_reference_tree_recursive!(tree = (dwarf, unit, abbreviations, entry));
+            tree.and_then(|mut type_tree| {
                 let type_root = type_tree.root()?;
                 build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
-            }),
+            })
+        }
         (variable_type, _) => variable_type,
     };
 

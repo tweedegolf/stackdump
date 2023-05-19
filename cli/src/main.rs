@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod logging;
 mod probe;
 
 #[derive(Parser, Debug)]
@@ -91,12 +92,7 @@ fn main() {
 }
 
 fn result_main() -> Result<(), Box<dyn Error>> {
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Off)
-        .env()
-        .with_colors(true)
-        .init()
-        .unwrap();
+    logging::init_logger();
 
     let args = Arguments::parse();
 

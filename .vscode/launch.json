@@ -34,6 +34,34 @@
             "console": "integratedTerminal",
         },
         {
+            "name": "(Linux) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            
+            "program": "${workspaceFolder}/target/debug/stackdump-cli",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "sourceFileMap": {
+                "/rustc/5e1a799842ba6ed4a57e91f7ab9435947482f7d8": "${env:USERPROFILE}/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/src/rust"
+            },
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                },
+                {
+                    "name": "RUST_LOG",
+                    "value": "info"
+                },
+            ],
+            "args": [
+                "cortex-m",
+                "./examples/data/nrf52840",
+                "./examples/data/nrf52840.dump"
+            ],
+            "preLaunchTask": "rust: cargo build",
+        },
+        {
             "name": "(Windows) Launch with probe",
             "type": "cppvsdbg",
             "request": "launch",

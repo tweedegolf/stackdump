@@ -24,19 +24,20 @@ pub fn build_base_type<W: funty::Integral>(
 
     let name = get_entry_name(dwarf, unit, entry)?;
     let encoding = entry
-        .required_attr(unit, gimli::constants::DW_AT_encoding)
+        .required_attr(&unit.header, gimli::constants::DW_AT_encoding)
         .map(|attr| {
             if let AttributeValue::Encoding(encoding) = attr.value() {
                 Ok(encoding)
             } else {
                 Err(TraceError::WrongAttributeValueType {
                     attribute_name: attr.name().to_string(),
-                    value_type_name: "Encoding",
+                    expected_type_name: "Encoding",
+                    gotten_value: format!("{:X?}", attr.value()),
                 })
             }
         })??;
     let byte_size = entry
-        .required_attr(unit, gimli::constants::DW_AT_byte_size)?
+        .required_attr(&unit.header, gimli::constants::DW_AT_byte_size)?
         .required_udata_value()?;
 
     type_value.data_mut().variable_type.name = name;

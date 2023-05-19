@@ -1,5 +1,6 @@
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
         value::Value,
@@ -29,15 +30,17 @@ pub fn build_tagged_union<W: funty::Integral>(
     type_value.data_mut().variable_type.archetype = Archetype::TaggedUnion;
     type_value.data_mut().variable_value = Ok(Value::Object);
 
-    let discriminant_attr = entry.required_attr(unit, gimli::constants::DW_AT_discr)?;
+    let discriminant_attr = entry.required_attr(&unit.header, gimli::constants::DW_AT_discr)?;
 
     let discriminant_unit_offset =
         if let AttributeValue::UnitRef(offset) = discriminant_attr.value() {
             Ok(offset)
         } else {
+            log::error!("{:?}", discriminant_attr.value());
             Err(TraceError::WrongAttributeValueType {
                 attribute_name: discriminant_attr.name().to_string(),
-                value_type_name: "UnitRef",
+                expected_type_name: "UnitRef",
+                gotten_value: format!("{:X?}", discriminant_attr.value()),
             })
         }?;
 
@@ -45,18 +48,20 @@ pub fn build_tagged_union<W: funty::Integral>(
 
     // We've got some data about the discriminant, let's make it our first type value child
 
-    let mut discriminant_tree =
-        get_entry_type_reference_tree(unit, abbreviations, &discriminant_entry).map(
-            |mut type_tree| {
-                type_tree
-                    .root()
-                    .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
-            },
-        )???;
+    get_entry_type_reference_tree_recursive!(
+        discriminant_tree = (dwarf, unit, abbreviations, &discriminant_entry)
+    );
+
+    let mut discriminant_tree = discriminant_tree.map(|mut type_tree| {
+        type_tree
+            .root()
+            .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
+    })???;
     discriminant_tree.root_mut().data_mut().name = "discriminant".into();
 
     // The discriminant has its own member location, so we need to offset the bit range
-    let discriminant_location_offset_bits = read_data_member_location(unit, &discriminant_entry)?;
+    let discriminant_location_offset_bits =
+        read_data_member_location(&unit.header, &discriminant_entry)?;
     discriminant_tree.root_mut().data_mut().bit_range.start += discriminant_location_offset_bits;
     discriminant_tree.root_mut().data_mut().bit_range.end += discriminant_location_offset_bits;
 
@@ -126,16 +131,18 @@ pub fn build_tagged_union<W: funty::Integral>(
                     entry_tag: "DW_TAG_variant_part".into(),
                 })?;
 
-        let variant_member_bit_offset = read_data_member_location(unit, variant_member.entry())?;
+        let variant_member_bit_offset =
+            read_data_member_location(&unit.header, variant_member.entry())?;
 
-        let variant_member_tree =
-            get_entry_type_reference_tree(unit, abbreviations, variant_member.entry()).map(
-                |mut type_tree| {
-                    type_tree.root().map(|root| {
-                        build_type_value_tree(dwarf, unit, abbreviations, root, type_cache)
-                    })
-                },
-            )???;
+        get_entry_type_reference_tree_recursive!(
+            variant_member_tree = (dwarf, unit, abbreviations, variant_member.entry())
+        );
+
+        let variant_member_tree = variant_member_tree.map(|mut type_tree| {
+            type_tree
+                .root()
+                .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
+        })???;
 
         variant_tree.root_mut().data_mut().bit_range = variant_member_bit_offset
             ..variant_member_bit_offset + variant_member_tree.root().data().bit_length();

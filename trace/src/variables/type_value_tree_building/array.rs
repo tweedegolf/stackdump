@@ -1,5 +1,6 @@
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
     variables::{build_type_value_tree, get_entry_type_reference_tree},
@@ -26,8 +27,11 @@ pub fn build_array<W: funty::Integral>(
     // What can be found on the entry are the type of the elements of the array and the byte size.
     // Arrays have one child entry that contains information about the indexing of the array.
 
-    let mut base_element_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
-        .map(|mut type_tree| {
+    get_entry_type_reference_tree_recursive!(
+        base_element_type_tree = (dwarf, unit, abbreviations, entry)
+    );
+
+    let mut base_element_type_tree = base_element_type_tree.map(|mut type_tree| {
         type_tree
             .root()
             .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
@@ -47,17 +51,17 @@ pub fn build_array<W: funty::Integral>(
     let child_entry = child.entry();
 
     let lower_bound = child_entry
-        .required_attr(unit, gimli::constants::DW_AT_lower_bound)?
+        .required_attr(&unit.header, gimli::constants::DW_AT_lower_bound)?
         .sdata_value()
         .unwrap_or(0);
 
     // There's either a count or an upper bound
     let count = match (
         child_entry
-            .required_attr(unit, gimli::constants::DW_AT_count)
+            .required_attr(&unit.header, gimli::constants::DW_AT_count)
             .and_then(|c| c.required_udata_value()),
         child_entry
-            .required_attr(unit, gimli::constants::DW_AT_upper_bound)
+            .required_attr(&unit.header, gimli::constants::DW_AT_upper_bound)
             .and_then(|c| c.required_sdata_value()),
     ) {
         // We've got a count, so let's use that

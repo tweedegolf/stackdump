@@ -1,5 +1,6 @@
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
     variables::{
@@ -32,7 +33,7 @@ pub fn build_object<W: funty::Integral>(
 
     let type_name = get_entry_name(dwarf, unit, entry)?;
     let byte_size = entry
-        .required_attr(unit, gimli::constants::DW_AT_byte_size)?
+        .required_attr(&unit.header, gimli::constants::DW_AT_byte_size)?
         .required_udata_value()?;
 
     // Check if this is a type that wraps another type
@@ -95,16 +96,18 @@ pub fn build_object<W: funty::Integral>(
 
         match member_entry.tag() {
             gimli::constants::DW_TAG_member => {
-                let member_location_offset_bits = read_data_member_location(unit, member_entry)?;
+                let member_location_offset_bits =
+                    read_data_member_location(&unit.header, member_entry)?;
 
-                let mut member_tree =
-                    get_entry_type_reference_tree(unit, abbreviations, member_entry).map(
-                        |mut type_tree| {
-                            type_tree.root().map(|root| {
-                                build_type_value_tree(dwarf, unit, abbreviations, root, type_cache)
-                            })
-                        },
-                    )???;
+                get_entry_type_reference_tree_recursive!(
+                    member_tree = (dwarf, unit, abbreviations, member_entry)
+                );
+
+                let mut member_tree = member_tree.map(|mut type_tree| {
+                    type_tree.root().map(|root| {
+                        build_type_value_tree(dwarf, unit, abbreviations, root, type_cache)
+                    })
+                })???;
 
                 member_tree.root_mut().data_mut().name = member_name;
                 member_tree.root_mut().data_mut().bit_range.end += member_location_offset_bits;

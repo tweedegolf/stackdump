@@ -1,5 +1,6 @@
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
     variables::{build_type_value_tree, get_entry_name, get_entry_type_reference_tree},
     DefaultReader,
@@ -23,8 +24,11 @@ pub fn build_typedef<W: funty::Integral>(
 
     let name = get_entry_name(dwarf, unit, entry)?;
 
-    let mut underlying_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
-        .map(|mut type_tree| {
+    get_entry_type_reference_tree_recursive!(
+        underlying_type_tree = (dwarf, unit, abbreviations, entry)
+    );
+
+    let mut underlying_type_tree = underlying_type_tree.map(|mut type_tree| {
         type_tree
             .root()
             .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))

@@ -1,5 +1,6 @@
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
         value::Value,
@@ -28,8 +29,11 @@ pub fn build_enumeration<W: funty::Integral>(
     // The entry also has a child `DW_TAG_enumerator` for each variant.
 
     let name = get_entry_name(dwarf, unit, entry)?;
-    let mut underlying_type_tree = get_entry_type_reference_tree(unit, abbreviations, entry)
-        .map(|mut type_tree| {
+
+    get_entry_type_reference_tree_recursive!(
+        underlying_type_tree = (dwarf, unit, abbreviations, entry)
+    );
+    let mut underlying_type_tree = underlying_type_tree.map(|mut type_tree| {
         type_tree
             .root()
             .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
@@ -58,7 +62,7 @@ pub fn build_enumeration<W: funty::Integral>(
 
         let enumerator_name = get_entry_name(dwarf, unit, enumerator_entry)?;
         let const_value = enumerator_entry
-            .required_attr(unit, gimli::constants::DW_AT_const_value)?
+            .required_attr(&unit.header, gimli::constants::DW_AT_const_value)?
             .required_sdata_value()?;
 
         type_value.push_back(TypeValueTree::new(TypeValue {

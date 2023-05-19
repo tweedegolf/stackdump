@@ -1,13 +1,13 @@
 use crate::error::TraceError;
 use gimli::{
     Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAddr, DwAt, Expression,
-    Reader, ReaderOffset, Unit,
+    Reader, ReaderOffset, UnitHeader,
 };
 
 pub trait DebuggingInformationEntryExt<R: Reader> {
     fn required_attr(
         &self,
-        unit: &Unit<R, R::Offset>,
+        unit_header: &UnitHeader<R>,
         name: DwAt,
     ) -> Result<Attribute<R>, TraceError>;
 }
@@ -17,11 +17,15 @@ where
     O: ReaderOffset + TryInto<u64>,
     R: Reader<Offset = O>,
 {
-    fn required_attr(&self, unit: &Unit<R, O>, name: DwAt) -> Result<Attribute<R>, TraceError> {
+    fn required_attr(
+        &self,
+        unit_header: &UnitHeader<R>,
+        name: DwAt,
+    ) -> Result<Attribute<R>, TraceError> {
         if let Some(attr) = self.attr(name)? {
             Ok(attr)
         } else {
-            let unit_section_offset = match unit.header.offset() {
+            let unit_section_offset = match unit_header.offset() {
                 gimli::UnitSectionOffset::DebugInfoOffset(o) => Some(
                     o.0.try_into()
                         .map_err(|_| TraceError::NumberConversionError)?,
@@ -51,10 +55,10 @@ where
 {
     fn required_attr(
         &self,
-        unit: &Unit<R, R::Offset>,
+        unit_header: &UnitHeader<R>,
         name: DwAt,
     ) -> Result<Attribute<R>, TraceError> {
-        (*self).required_attr(unit, name)
+        (*self).required_attr(unit_header, name)
     }
 }
 
@@ -79,7 +83,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.u8_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -87,7 +92,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.u16_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -95,7 +101,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.udata_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -103,7 +110,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.sdata_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -111,7 +119,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.offset_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -119,7 +128,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.exprloc_value()
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -127,7 +137,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.string_value(debug_str)
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -139,7 +150,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
         self.string_value_sup(debug_str, debug_str_sup)
             .ok_or_else(|| TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             })
     }
 
@@ -148,7 +160,8 @@ impl<R: Reader> AttributeExt<R> for Attribute<R> {
             AttributeValue::AddressClass(class) => Ok(class),
             _ => Err(TraceError::WrongAttributeValueType {
                 attribute_name: self.name().to_string(),
-                value_type_name: get_attribute_value_type_name(&self.value()),
+                expected_type_name: get_attribute_value_type_name(&self.value()),
+                gotten_value: format!("{:X?}", self.value()),
             }),
         }
     }

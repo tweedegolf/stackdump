@@ -11,6 +11,7 @@ use crate::{type_value_tree::VariableDataError, DefaultReader};
 /// The main error type during the tracing procedure
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum TraceError {
     #[error("The elf file does not contain the required `{0}` section")]
     MissingElfSection(String),
@@ -28,11 +29,16 @@ pub enum TraceError {
         entry_tag: String,
         attribute_name: String,
     },
-    #[error("An attribute ({attribute_name}) has the wrong value type: {value_type_name}")]
+    #[error("An attribute ({attribute_name}) has the wrong value type. Expected: {expected_type_name}, gotten: {gotten_value}")]
     WrongAttributeValueType {
         attribute_name: String,
-        value_type_name: &'static str,
+        expected_type_name: &'static str,
+        gotten_value: String,
     },
+    #[error("The given debug info offset of {debug_info_offset:X} could not be linked with a known compilation unit")]
+    DebugInfoOffsetUnitNotFound { debug_info_offset: usize },
+    #[error("We got redirected to another unit for the second time while the first redirection should have worked")]
+    UnitNotFoundAgain,
     #[error("The tag `{tag_name}` @`{entry_debug_info_offset:#X}` has not been implemented yet")]
     TagNotImplemented {
         tag_name: String,
