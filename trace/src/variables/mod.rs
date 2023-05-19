@@ -1162,14 +1162,19 @@ where
         }
         (Ok(variable_name), Err(type_error)) => {
             log::debug!(
-                "Could not read the type of variable `{}`: {}",
+                "Could not read the type of variable `{}` of entry {:X?}: {}",
                 variable_name,
+                entry.offset(),
                 type_error
             );
             Ok(None)
         }
         (Err(name_error), _) => {
-            log::debug!("Could not get the name of a variable: {}", name_error);
+            log::debug!(
+                "Could not get the name of a variable of entry {:X?}: {}",
+                entry.offset(),
+                name_error
+            );
             Ok(None)
         }
     }

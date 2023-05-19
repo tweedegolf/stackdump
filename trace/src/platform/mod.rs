@@ -74,11 +74,36 @@ where
         ));
     }
 
+    let endian = if elf.is_little_endian() {
+        gimli::RunTimeEndian::Little
+    } else {
+        gimli::RunTimeEndian::Big
+    };
+
+    fn load_section<'data: 'file, 'file, O, Endian>(
+        id: gimli::SectionId,
+        file: &'file O,
+        endian: Endian,
+    ) -> Result<gimli::EndianRcSlice<Endian>, TraceError>
+    where
+        O: addr2line::object::Object<'data, 'file>,
+        Endian: gimli::Endianity,
+    {
+        let data = file
+            .section_by_name(id.name())
+            .and_then(|section| section.uncompressed_data().ok())
+            .unwrap_or(std::borrow::Cow::Borrowed(&[]));
+        Ok(gimli::EndianRcSlice::new(std::rc::Rc::from(&*data), endian))
+    }
+
+    let dwarf = gimli::Dwarf::load(|id| load_section(id, &elf, endian))?;
+
     // Create the vector we'll be adding our found frames to
     let mut frames = Vec::new();
 
     // To find the frames, we need the addr2line context which does a lot of the work for us
-    let addr2line_context = addr2line::Context::new(&elf)?;
+    let addr2line_context =
+        addr2line::Context::from_dwarf(gimli::Dwarf::load(|id| load_section(id, &elf, endian))?)?;
 
     // To unwind, we need the platform context
     let mut platform_context = P::create_context(&elf)?;
@@ -138,11 +163,8 @@ where
     }
 
     // We're done with the stack data, but we can also decode the static variables and make a frame out of that
-    let static_variables = crate::variables::find_static_variables(
-        addr2line_context.dwarf(),
-        &device_memory,
-        &mut type_cache,
-    )?;
+    let static_variables =
+        crate::variables::find_static_variables(&dwarf, &device_memory, &mut type_cache)?;
     let static_frame = Frame {
         function: "Static".into(),
         location: Location {
@@ -169,18 +191,20 @@ where
     <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
 {
     // Find the frames of the current register context
-    let mut context_frames =
-        addr2line_context.find_frames(device_memory.register(gimli::Arm::PC)?.as_u64())?;
+    let mut context_frames = addr2line_context
+        .find_frames(device_memory.register(gimli::Arm::PC)?.as_u64())
+        .skip_all_loads()?;
 
     // Get the debug compilation unit of the current register context
-    let unit = addr2line_context
-        .find_dwarf_unit(device_memory.register(gimli::Arm::PC)?.as_u64())
+    let (dwarf, unit) = addr2line_context
+        .find_dwarf_and_unit(device_memory.register(gimli::Arm::PC)?.as_u64())
+        .skip_all_loads()
         .ok_or(TraceError::DwarfUnitNotFound {
             pc: device_memory.register(gimli::Arm::PC)?.as_u64(),
         })?;
 
     // Get the abbreviations of the unit
-    let abbreviations = addr2line_context.dwarf().abbreviations(&unit.header)?;
+    let abbreviations = dwarf.abbreviations(&unit.header)?;
 
     // Loop through the found frames and add them
     let mut added_frames = 0;
@@ -208,7 +232,7 @@ where
 
             if let Ok(entry_root) = entries.root() {
                 variables = crate::variables::find_variables_in_function(
-                    addr2line_context.dwarf(),
+                    dwarf,
                     unit,
                     &abbreviations,
                     device_memory,

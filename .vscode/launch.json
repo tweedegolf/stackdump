@@ -51,7 +51,7 @@
                 },
                 {
                     "name": "RUST_LOG",
-                    "value": "info"
+                    "value": "trace"
                 },
             ],
             "args": [
