@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## Cli 0.1.7 (19-05-23)
+
+- Update to trace 0.3.0
+- Move to env-logger for better logging
+
+## Trace 0.3.0 (19-05-23)
+
+- *Breaking*: TraceError is now non-exhaustive and has more variants
+- Update to Addr2line 0.20.0
+- Now works with more debug info situations. (I think a recent LLVM update might have changed some things where `DebugInfoRef`s are now generated instead of the `UnitRef`s before)
+
 ## Capture 0.4.0 (07-04-23)
 
 - *Breaking*: Capturing no longer takes a critical section. I'm now convinced this is not necessary.
