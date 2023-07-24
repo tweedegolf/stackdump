@@ -22,7 +22,7 @@ use gimli::{
     EntriesTree, Evaluation, EvaluationResult, Piece, Reader, Unit, UnitHeader, UnitOffset,
 };
 use stackdump_core::device_memory::DeviceMemory;
-use std::{collections::HashMap, pin::Pin};
+use std::{collections::HashMap, pin::Pin, backtrace::Backtrace};
 
 mod type_value_tree_building;
 
@@ -442,6 +442,7 @@ fn build_type_value_tree<W: funty::Integral>(
             Ok(type_value_tree)
         } // Ignore
         tag => Err(TraceError::TagNotImplemented {
+            backtrace: Backtrace::force_capture().to_string(),
             tag_name: tag.to_string(),
             entry_debug_info_offset: entry.offset().to_debug_info_offset(&unit.header).unwrap().0,
         }),
@@ -801,7 +802,7 @@ fn read_variable_data<W: funty::Integral>(
     match variable.data().variable_type.archetype {
         Archetype::TaggedUnion => {
             // The first child must be the descriminator and not one of the variants
-            assert!(variable.front_mut().unwrap().data().name == "discriminant");
+            assert!(variable.front_mut().unwrap().data().name == "discriminant", "Invalid tagged union format: {variable:?}");
 
             // We have to read the discriminator, then select the active variant and then read that
             read_variable_data(
@@ -1064,6 +1065,10 @@ where
     if entry.tag() == gimli::constants::DW_TAG_formal_parameter && variable_name.is_err() {
         log::trace!("Formal parameter does not have a name, renaming it to 'param'");
         variable_name = Ok("param".into());
+    }
+    if entry.tag() == gimli::constants::DW_TAG_subroutine_type && variable_name.is_err() {
+        log::trace!("Subroutines don't always have names. Renaming it to 'subroutine'");
+        variable_name = Ok("subroutine".into());
     }
 
     // Get the type of the variable

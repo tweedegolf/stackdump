@@ -53,7 +53,7 @@ pub fn build_object<W: funty::Integral>(
     // The members of the object can be found by looking at the children of the node
     let mut children = node.children();
     while let Ok(Some(child)) = children.next() {
-        let member_entry = child.entry();
+        let mut member_entry = child.entry().clone();
 
         // We can be a normal object, but we can also still be a tagged union.
         // We know that we're a tagged union if one of the members has the `DW_TAG_variant_part` tag, so we'll check for that.
@@ -61,18 +61,34 @@ pub fn build_object<W: funty::Integral>(
         // that could be the case with how the DWARF spec states things. This isn't something Rust and I think even C++ can do.
 
         if member_entry.tag() == gimli::constants::DW_TAG_variant_part {
-            // This is a tagged union, so ignore everything and build the type value tree from this child
-            let mut tagged_union =
-                build_type_value_tree(dwarf, unit, abbreviations, child, type_cache);
+            if member_entry.attr(gimli::constants::DW_AT_discr)?.is_none() {
+                // This is classified as a tagged union, but is has no discriminant and likely only one member.
+                // We'll ignore it and see its member as our own member
 
-            if let Ok(tagged_union) = tagged_union.as_mut() {
-                // The tagged union child doesn't have a name or byte size, so we need to give it the name of the object we
-                // we thought we would get
-                tagged_union.root_mut().data_mut().variable_type.name = type_name;
-                tagged_union.root_mut().data_mut().bit_range = 0..byte_size * 8;
+                // First child is variant, child of variant is member
+                match child.children().next()? {
+                    Some(variant) => match variant.children().next()? {
+                        Some(member) => {
+                            member_entry = member.entry().clone();
+                        }
+                        None => continue,
+                    },
+                    None => continue,
+                };
+            } else {
+                // This is a tagged union, so ignore everything and build the type value tree from this child
+                let mut tagged_union =
+                    build_type_value_tree(dwarf, unit, abbreviations, child, type_cache);
+
+                if let Ok(tagged_union) = tagged_union.as_mut() {
+                    // The tagged union child doesn't have a name or byte size, so we need to give it the name of the object we
+                    // we thought we would get
+                    tagged_union.root_mut().data_mut().variable_type.name = type_name;
+                    tagged_union.root_mut().data_mut().bit_range = 0..byte_size * 8;
+                }
+
+                return tagged_union;
             }
-
-            return tagged_union;
         }
 
         // This is an object and not a tagged union
@@ -86,7 +102,7 @@ pub fn build_object<W: funty::Integral>(
         // Type parameters only have a name and a type.
         // The rest of the children are ignored.
 
-        let member_name = match get_entry_name(dwarf, unit, member_entry) {
+        let member_name = match get_entry_name(dwarf, unit, &member_entry) {
             Ok(member_name) => member_name,
             Err(_) => continue, // Only care about named members for now
         };
@@ -94,10 +110,10 @@ pub fn build_object<W: funty::Integral>(
         match member_entry.tag() {
             gimli::constants::DW_TAG_member => {
                 let member_location_offset_bits =
-                    read_data_member_location(&unit.header, member_entry)?;
+                    read_data_member_location(&unit.header, &member_entry)?;
 
                 get_entry_type_reference_tree_recursive!(
-                    member_tree = (dwarf, unit, abbreviations, member_entry)
+                    member_tree = (dwarf, unit, abbreviations, &member_entry)
                 );
 
                 let mut member_tree = member_tree.map(|mut type_tree| {

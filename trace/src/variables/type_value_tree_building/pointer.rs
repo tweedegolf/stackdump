@@ -38,11 +38,11 @@ pub fn build_pointer<W: funty::Integral>(
                     .to_debug_info_offset(&unit.header)
                     .unwrap();
 
-                let pointee_type_name = get_entry_name(dwarf, unit, root.entry());
+                let pointee_type_name = get_entry_name(dwarf, unit, root.entry()).unwrap_or_else(|_| "pointer".to_string());
 
-                pointee_type_name.map(|ptn| (ptn, die_offset))
+                (pointee_type_name, die_offset)
             })
-        })???
+        })??
     };
 
     // Some pointers don't have names, but generally it is just `&<typename>`
@@ -82,7 +82,9 @@ pub fn build_pointer<W: funty::Integral>(
         let pointee_type_tree = pointee_type_tree.map(|mut type_tree| {
             type_tree
                 .root()
-                .map(|root| build_type_value_tree(dwarf, unit, abbreviations, root, type_cache))
+                .map(|root| {
+                    build_type_value_tree(dwarf, unit, abbreviations, root, type_cache)
+        })
         })???;
         type_cache.insert(pointee_type_die_offset, Ok(pointee_type_tree));
     }

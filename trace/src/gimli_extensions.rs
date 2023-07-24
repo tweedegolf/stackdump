@@ -1,3 +1,5 @@
+use std::backtrace::Backtrace;
+
 use crate::error::TraceError;
 use gimli::{
     Attribute, AttributeValue, DebugStr, DebuggingInformationEntry, DwAddr, DwAt, Expression,
@@ -38,6 +40,10 @@ where
                 .0
                 .try_into()
                 .map_err(|_| TraceError::NumberConversionError)?;
+
+            if unit_section_offset.map(|uo| uo + unit_offset) == Some(0x2CA3E2) {
+                println!("{}", Backtrace::force_capture());
+            }
 
             Err(TraceError::MissingAttribute {
                 entry_debug_info_offset: unit_section_offset.map(|uo| uo + unit_offset),

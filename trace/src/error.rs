@@ -1,6 +1,6 @@
 //! All error types of the crate
 
-use std::rc::Rc;
+use std::{rc::Rc, backtrace::Backtrace};
 
 use gimli::EvaluationResult;
 use stackdump_core::device_memory::{MemoryReadError, MissingRegisterError};
@@ -39,8 +39,9 @@ pub enum TraceError {
     DebugInfoOffsetUnitNotFound { debug_info_offset: usize },
     #[error("We got redirected to another unit for the second time while the first redirection should have worked")]
     UnitNotFoundAgain,
-    #[error("The tag `{tag_name}` @`{entry_debug_info_offset:#X}` has not been implemented yet")]
+    #[error("The tag `{tag_name}` @`{entry_debug_info_offset:#X}` has not been implemented yet: {backtrace}")]
     TagNotImplemented {
+        backtrace: String,
         tag_name: String,
         entry_debug_info_offset: usize,
     },
