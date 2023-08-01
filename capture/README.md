@@ -37,9 +37,8 @@ let mut stack_capture = ArrayMemoryRegion::default();
 let mut core_registers = ArrayRegisterData::default();
 let mut fpu_registers = ArrayRegisterData::default();
 
-cortex_m::interrupt::free(|cs| {
-    stackdump_capture::cortex_m::capture(&mut stack_capture, &mut core_registers, &mut fpu_registers, &cs)
-});
+
+stackdump_capture::cortex_m::capture(&mut stack_capture, &mut core_registers, &mut fpu_registers);
 ```
 
 ## For use when crashing (using cortex m as example target)
@@ -102,19 +101,16 @@ Now we can capture a everything in e.g. a panic.
 ```rust,ignore
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    cortex_m::interrupt::free(|cs| {
-        unsafe {
-            stackdump_capture::cortex_m::capture(
-                &mut *STACK_CAPTURE.as_mut_ptr(),
-                &mut *CORE_REGISTERS_CAPTURE.as_mut_ptr(),
-                &mut *FPU_REGISTERS_CAPTURE.as_mut_ptr(),
-                &cs
-            );
-            // If you want to capture the heap or the static data, then do that here too yourself
-        }
+    unsafe {
+        stackdump_capture::cortex_m::capture(
+            &mut *STACK_CAPTURE.as_mut_ptr(),
+            &mut *CORE_REGISTERS_CAPTURE.as_mut_ptr(),
+            &mut *FPU_REGISTERS_CAPTURE.as_mut_ptr(),
+        );
+        // If you want to capture the heap or the static data, then do that here too yourself
+    }
 
-        set_capture_made();
-    });
+    set_capture_made();
     cortex_m::peripheral::SCB::sys_reset()
 }
 ```
