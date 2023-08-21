@@ -112,8 +112,8 @@ pub fn build_tagged_union<W: funty::Integral>(
         let mut variant_tree = TypeValueTree::new(TypeValue {
             name: "variant".into(),
             variable_type: VariableType {
-                name: "".into(),
                 archetype: Archetype::TaggedUnionVariant,
+                ..Default::default()
             },
             bit_range: 0..0,
             variable_value: discriminator_value

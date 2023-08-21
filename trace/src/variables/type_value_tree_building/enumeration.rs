@@ -68,8 +68,8 @@ pub fn build_enumeration<W: funty::Integral>(
         type_value.push_back(TypeValueTree::new(TypeValue {
             name: enumerator_name,
             variable_type: VariableType {
-                name: "".into(),
                 archetype: Archetype::Enumerator,
+                ..Default::default()
             },
             bit_range: underlying_type_bitrange.clone(),
             variable_value: Ok(Value::Int(const_value as i128)),

@@ -1,7 +1,7 @@
 use crate::{
     error::TraceError,
     get_entry_type_reference_tree_recursive,
-    gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
+    gimli_extensions::AttributeExt,
     type_value_tree::{variable_type::Archetype, TypeValue, TypeValueTree},
     variables::{build_type_value_tree, get_entry_name},
     DefaultReader,
@@ -56,13 +56,16 @@ pub fn build_pointer<W: funty::Integral>(
     // We do perform the check though to be sure.
 
     let address_class = entry
-        .required_attr(&unit.header, gimli::constants::DW_AT_address_class)?
-        .required_address_class()?;
-    if address_class != gimli::constants::DW_ADDR_none {
-        return Err(TraceError::UnexpectedPointerClass {
-            pointer_name: name,
-            class_value: address_class,
-        });
+        .attr(gimli::constants::DW_AT_address_class)?
+        .map(|address_class| address_class.required_address_class())
+        .transpose()?;
+    if let Some(address_class) = address_class {
+        if address_class != gimli::constants::DW_ADDR_none {
+            return Err(TraceError::UnexpectedPointerClass {
+                pointer_name: name,
+                class_value: address_class,
+            });
+        }
     }
 
     type_value.data_mut().variable_type.name = name;

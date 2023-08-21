@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-capture-probe"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
@@ -13,6 +13,6 @@ description = "Crate for capturing stack dumps of embedded devices with a debugg
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-probe-rs = "0.18.0"
-stackdump-core = { version = "0.3.0", path = "../core" }
+probe-rs = "0.20.0"
+stackdump-core = { version = "0.4.0", path = "../core" }
 

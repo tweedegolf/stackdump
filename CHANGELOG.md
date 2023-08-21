@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## Cli 0.1.8, Capture 0.5.0, Core 0.4.0, Trace 0.4.0, Capture-probe 0.4.0 (21-08-23)
+
+- Updated gimli to 0.28
+- Updated Addr2line to 0.21
+- Updated to probe-rs 0.20
+- Fixed bug where the abstract origin didn't get handled
+- Volatile and const types can now be traced (relevant for C)
+
 ## Cli 0.1.7 (19-05-23)
 
 - Update to trace 0.3.0

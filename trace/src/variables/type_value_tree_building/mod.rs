@@ -18,3 +18,9 @@ pub use typedef::build_typedef;
 
 mod enumeration;
 pub use enumeration::build_enumeration;
+
+mod volatile_type;
+pub use volatile_type::build_volatile_type;
+
+mod const_type;
+pub use const_type::build_const_type;

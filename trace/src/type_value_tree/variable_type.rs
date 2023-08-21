@@ -4,6 +4,10 @@ use gimli::{DebugInfoOffset, DwAte};
 pub struct VariableType {
     pub name: String,
     pub archetype: Archetype,
+    /// Is the type a volatile type? (This is a C-ism)
+    pub volatile: bool,
+    /// Is the type const? (This is a C-ism)
+    pub const_type: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

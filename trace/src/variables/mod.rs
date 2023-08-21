@@ -8,6 +8,7 @@
 
 use crate::{
     error::TraceError,
+    get_entry_type_reference_tree_recursive,
     gimli_extensions::{AttributeExt, DebuggingInformationEntryExt},
     type_value_tree::{
         value::{StringFormat, Value},
@@ -41,12 +42,41 @@ fn get_entry_name(
     unit: &Unit<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<String, TraceError> {
-    // Find the attribute
-    let name_attr = entry.required_attr(&unit.header, gimli::constants::DW_AT_name)?;
-    // Read as a string type
-    let attr_string = dwarf.attr_string(unit, name_attr.value())?;
-    // Convert to String
-    Ok(attr_string.to_string()?.into())
+    if entry.tag() == gimli::constants::DW_TAG_volatile_type
+        || entry.tag() == gimli::constants::DW_TAG_const_type
+    {
+        // These tags don't have a name of their own,
+        // so we must follow the the DW_AT_type attribute that points to another entry
+
+        let abbreviations = dwarf.abbreviations(&unit.header)?;
+
+        get_entry_type_reference_tree_recursive!(
+            variable_type_value_tree = (dwarf, unit, &abbreviations, entry)
+        );
+
+        get_entry_name(dwarf, unit, variable_type_value_tree?.root()?.entry())
+    } else {
+        // Find the attribute
+        let name_attr = entry.required_attr(&unit.header, gimli::constants::DW_AT_name);
+
+        match name_attr {
+            Ok(name_attr) => {
+                // Read as a string type
+                let attr_string = dwarf.attr_string(unit, name_attr.value())?;
+                // Convert to String
+                Ok(attr_string.to_string()?.into())
+            }
+            Err(_) if entry.tag() == gimli::constants::DW_TAG_array_type => {
+                // Arrays can be anonymous
+                return Ok("array".into());
+            }
+            Err(_) if entry.tag() == gimli::constants::DW_TAG_subroutine_type => {
+                // Subroutines can be anonymous
+                return Ok("subroutine".into());
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// If available, get the EntriesTree of the `DW_AT_abstract_origin` attribute of the given entry
@@ -55,34 +85,25 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     unit_header: &'unit UnitHeader<DefaultReader>,
     abbreviations: &'abbrev Abbreviations,
     entry: &DebuggingInformationEntry<DefaultReader>,
-) -> Result<Option<EntriesTree<'abbrev, 'unit, DefaultReader>>, GetEntryTreeError> {
+) -> Result<EntriesTree<'abbrev, 'unit, DefaultReader>, GetEntryTreeError> {
     // Find the attribute
     let abstract_origin_attr = entry
-        .attr(gimli::constants::DW_AT_abstract_origin)
-        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?;
-
-    let abstract_origin_attr = match abstract_origin_attr {
-        Some(abstract_origin_attr) => abstract_origin_attr,
-        None => return Ok(None),
-    };
+        .required_attr(unit_header, gimli::constants::DW_AT_abstract_origin)
+        .map_err(GetEntryTreeError::TraceError)?;
 
     // Check its offset
     match abstract_origin_attr.value() {
         AttributeValue::UnitRef(offset) => {
             // Get the entries for the type
-            Ok(Some(
-                unit_header
-                    .entries_tree(abbreviations, Some(offset))
-                    .map_err(|e| GetEntryTreeError::TraceError(e.into()))?,
-            ))
+            Ok(unit_header
+                .entries_tree(abbreviations, Some(offset))
+                .map_err(|e| GetEntryTreeError::TraceError(e.into()))?)
         }
         AttributeValue::DebugInfoRef(offset) => {
             if let Some(offset) = offset.to_unit_offset(unit_header) {
-                return Ok(Some(
-                    unit_header
-                        .entries_tree(abbreviations, Some(offset))
-                        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?,
-                ));
+                return unit_header
+                    .entries_tree(abbreviations, Some(offset))
+                    .map_err(|e| GetEntryTreeError::TraceError(e.into()));
             }
 
             // The offset is not in our current compilation unit. Let's see if we can find the correct one
@@ -121,7 +142,7 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
     // Find the attribute
     let type_attr = entry
         .required_attr(unit_header, gimli::constants::DW_AT_type)
-        .map_err(|e| GetEntryTreeError::TraceError(e.into()))?;
+        .map_err(GetEntryTreeError::TraceError)?;
 
     // Check its offset
     match type_attr.value() {
@@ -133,9 +154,9 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
         }
         AttributeValue::DebugInfoRef(offset) => {
             if let Some(offset) = offset.to_unit_offset(unit_header) {
-                return Ok(unit_header
+                return unit_header
                     .entries_tree(abbreviations, Some(offset))
-                    .map_err(|e| GetEntryTreeError::TraceError(e.into()))?);
+                    .map_err(|e| GetEntryTreeError::TraceError(e.into()));
             }
 
             // The offset is not in our current compilation unit. Let's see if we can find the correct one
@@ -183,7 +204,7 @@ macro_rules! get_entry_abstract_origin_reference_tree_recursive {
     ($tree_name:ident = ($dwarf:expr, $unit:expr, $abbreviations:expr, $entry:expr)) => {
         let mut __unit_header = $unit.header.clone();
         #[allow(unused_mut)]
-        let mut $tree_name = match crate::variables::get_entry_abstract_origin_reference_tree(
+        let mut $tree_name = match $crate::variables::get_entry_abstract_origin_reference_tree(
             $dwarf,
             &__unit_header,
             $abbreviations,
@@ -209,7 +230,7 @@ macro_rules! get_entry_type_reference_tree_recursive {
     ($tree_name:ident = ($dwarf:expr, $unit:expr, $abbreviations:expr, $entry:expr)) => {
         let mut __unit_header = $unit.header.clone();
         #[allow(unused_mut)]
-        let mut $tree_name = match crate::variables::get_entry_type_reference_tree(
+        let mut $tree_name = match $crate::variables::get_entry_type_reference_tree(
             $dwarf,
             &__unit_header,
             $abbreviations,
@@ -259,9 +280,9 @@ where
 ///
 /// This is done based on the `DW_AT_decl_file`, `DW_AT_decl_line` and `DW_AT_decl_column` attributes.
 /// These are normally present on variables and functions.
-fn find_entry_location<'unit>(
+fn find_entry_location(
     dwarf: &Dwarf<DefaultReader>,
-    unit: &'unit Unit<DefaultReader, usize>,
+    unit: &Unit<DefaultReader, usize>,
     entry: &DebuggingInformationEntry<DefaultReader, usize>,
 ) -> Result<Location, TraceError> {
     // Get the attributes
@@ -441,6 +462,16 @@ fn build_type_value_tree<W: funty::Integral>(
             type_value.data_mut().variable_type.archetype = Archetype::Subroutine;
             Ok(type_value_tree)
         } // Ignore
+        gimli::constants::DW_TAG_volatile_type => type_value_tree_building::build_volatile_type(
+            dwarf,
+            unit,
+            abbreviations,
+            node,
+            type_cache,
+        ),
+        gimli::constants::DW_TAG_const_type => {
+            type_value_tree_building::build_const_type(dwarf, unit, abbreviations, node, type_cache)
+        }
         tag => Err(TraceError::TagNotImplemented {
             tag_name: tag.to_string(),
             entry_debug_info_offset: entry.offset().to_debug_info_offset(&unit.header).unwrap().0,
@@ -504,7 +535,6 @@ where
 
     // Turn the expression into an evaluation
     let result = evaluate_expression(
-        dwarf,
         unit,
         device_memory,
         frame_base,
@@ -522,7 +552,6 @@ where
 }
 
 fn evaluate_expression<W: funty::Integral>(
-    dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
     device_memory: &DeviceMemory<W>,
     frame_base: Option<W>,
@@ -561,7 +590,6 @@ where
             }
             EvaluationResult::RequiresEntryValue(ex) => {
                 let entry_pieces = evaluate_expression(
-                    dwarf,
                     unit,
                     device_memory,
                     frame_base,
@@ -736,22 +764,26 @@ fn read_base_type<W: funty::Integral>(
     data: &BitSlice<u8, Lsb0>,
 ) -> Result<Value<W>, VariableDataError> {
     match encoding {
-        gimli::constants::DW_ATE_unsigned => match data.len() {
-            8 => Ok(Value::Uint(data.load_le::<u8>() as _)),
-            16 => Ok(Value::Uint(data.load_le::<u16>() as _)),
-            32 => Ok(Value::Uint(data.load_le::<u32>() as _)),
-            64 => Ok(Value::Uint(data.load_le::<u64>() as _)),
-            128 => Ok(Value::Uint(data.load_le::<u128>() as _)),
-            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
-        },
-        gimli::constants::DW_ATE_signed => match data.len() {
-            8 => Ok(Value::Int(data.load_le::<u8>() as _)),
-            16 => Ok(Value::Int(data.load_le::<u16>() as _)),
-            32 => Ok(Value::Int(data.load_le::<u32>() as _)),
-            64 => Ok(Value::Int(data.load_le::<u64>() as _)),
-            128 => Ok(Value::Int(data.load_le::<u128>() as _)),
-            _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
-        },
+        gimli::constants::DW_ATE_unsigned | gimli::constants::DW_ATE_unsigned_char => {
+            match data.len() {
+                8 => Ok(Value::Uint(data.load_le::<u8>() as _)),
+                16 => Ok(Value::Uint(data.load_le::<u16>() as _)),
+                32 => Ok(Value::Uint(data.load_le::<u32>() as _)),
+                64 => Ok(Value::Uint(data.load_le::<u64>() as _)),
+                128 => Ok(Value::Uint(data.load_le::<u128>() as _)),
+                _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+            }
+        }
+        gimli::constants::DW_ATE_signed | gimli::constants::DW_ATE_signed_char => {
+            match data.len() {
+                8 => Ok(Value::Int(data.load_le::<u8>() as _)),
+                16 => Ok(Value::Int(data.load_le::<u16>() as _)),
+                32 => Ok(Value::Int(data.load_le::<u32>() as _)),
+                64 => Ok(Value::Int(data.load_le::<u64>() as _)),
+                128 => Ok(Value::Int(data.load_le::<u128>() as _)),
+                _ => Err(VariableDataError::InvalidSize { bits: data.len() }),
+            }
+        }
         gimli::constants::DW_ATE_float => match data.len() {
             32 => Ok(Value::Float(f32::from_bits(data.load_le::<u32>()) as _)),
             64 => Ok(Value::Float(f64::from_bits(data.load_le::<u64>()) as _)),
@@ -942,8 +974,8 @@ fn read_variable_data<W: funty::Integral>(
                 Err(_) => TypeValueTree::new(TypeValue {
                     name: "Pointee".into(),
                     variable_type: VariableType {
-                        name: "".into(),
                         archetype: Archetype::Unknown,
+                        ..Default::default()
                     },
                     bit_range: 0..0,
                     variable_value: Err(VariableDataError::Unknown),
@@ -1045,7 +1077,7 @@ where
     get_entry_abstract_origin_reference_tree_recursive!(
         abstract_origin_tree = (dwarf, unit, abbreviations, entry)
     );
-    let mut abstract_origin_tree = abstract_origin_tree?;
+    let mut abstract_origin_tree = abstract_origin_tree.ok();
 
     let abstract_origin_node = abstract_origin_tree
         .as_mut()
@@ -1066,27 +1098,36 @@ where
         variable_name = Ok("param".into());
     }
 
-    // Get the type of the variable
+    // Get the type of the variable or its abstract origin
     get_entry_type_reference_tree_recursive!(
-        variable_type_value_tree = (dwarf, unit, abbreviations, entry)
+        variable_type_tree = (dwarf, unit, abbreviations, entry)
     );
 
-    let variable_type_value_tree = variable_type_value_tree.and_then(|mut type_tree| {
-        let type_root = type_tree.root()?;
-        build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
-    });
+    get_entry_abstract_origin_reference_tree_recursive!(
+        abstract_origin_tree = (dwarf, unit, abbreviations, entry)
+    );
 
-    // Alternatively, get the type from the abstract origin
-    let variable_type_value_tree = match (variable_type_value_tree, abstract_origin_entry) {
-        (Err(_), Some(entry)) => {
-            get_entry_type_reference_tree_recursive!(tree = (dwarf, unit, abbreviations, entry));
-            tree.and_then(|mut type_tree| {
-                let type_root = type_tree.root()?;
-                build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
-            })
+    let variable_type_value_tree = (|| match (variable_type_tree, abstract_origin_tree) {
+        (Ok(mut variable_type_tree), _) => {
+            let type_root = variable_type_tree.root()?;
+            build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
         }
-        (variable_type, _) => variable_type,
-    };
+        (_, Ok(mut abstract_origin_tree)) => {
+            let abstract_entry = abstract_origin_tree.root()?.entry().clone();
+            get_entry_type_reference_tree_recursive!(
+                abstract_variable_type_tree = (dwarf, unit, abbreviations, &abstract_entry)
+            );
+
+            match abstract_variable_type_tree {
+                Ok(mut abstract_variable_type_tree) => {
+                    let type_root = abstract_variable_type_tree.root()?;
+                    build_type_value_tree(dwarf, unit, abbreviations, type_root, type_cache)
+                }
+                Err(e) => Err(e),
+            }
+        }
+        (Err(e), _) => Err(e),
+    })();
 
     let variable_kind = VariableKind {
         zero_sized: variable_type_value_tree
@@ -1161,10 +1202,10 @@ where
             }))
         }
         (Ok(variable_name), Err(type_error)) => {
-            log::debug!(
+            log::info!(
                 "Could not read the type of variable `{}` of entry {:X?}: {}",
                 variable_name,
-                entry.offset(),
+                entry.offset().to_debug_info_offset(&unit.header),
                 type_error
             );
             Ok(None)
@@ -1172,7 +1213,7 @@ where
         (Err(name_error), _) => {
             log::debug!(
                 "Could not get the name of a variable of entry {:X?}: {}",
-                entry.offset(),
+                entry.offset().to_debug_info_offset(&unit.header),
                 name_error
             );
             Ok(None)
@@ -1298,7 +1339,8 @@ where
             | gimli::constants::DW_TAG_typedef
             | gimli::constants::DW_TAG_restrict_type
             | gimli::constants::DW_TAG_const_type
-            | gimli::constants::DW_TAG_union_type => return Ok(()),
+            | gimli::constants::DW_TAG_union_type
+            | gimli::constants::DW_TAG_volatile_type => return Ok(()),
             gimli::constants::DW_TAG_variable => {
                 if let Some(variable) = read_variable_entry(
                     dwarf,
@@ -1313,7 +1355,11 @@ where
                 }
             }
             tag => {
-                log::error!("Unexpected tag in the search of static variables: {}", tag);
+                log::error!(
+                    "Unexpected tag in the search of static variables: {} at {:X?}",
+                    tag,
+                    entry.offset().to_debug_info_offset(&unit.header)
+                );
                 return Ok(());
             }
         }

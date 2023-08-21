@@ -3,7 +3,7 @@ use crate::{
     render_colors::{Theme, ThemeColors},
     type_value_tree::VariableDataError,
 };
-use colored::ColoredString;
+use colored::{ColoredString, Colorize};
 use phf::phf_map;
 
 pub fn render_type_value_tree<ADDR: funty::Integral>(
@@ -23,7 +23,17 @@ fn render_unknown<ADDR: funty::Integral>(
             .into();
     };
 
-    match type_value_node.data().variable_type.archetype {
+    let const_string = match type_value_node.data().variable_type.const_type {
+        true => "const ",
+        false => "",
+    };
+
+    let volatile_string = match type_value_node.data().variable_type.volatile {
+        true => "volatile ",
+        false => "",
+    };
+
+    let type_value_string = match type_value_node.data().variable_type.archetype {
         Archetype::TaggedUnion => render_tagged_union(type_value_node, theme),
         Archetype::Structure
         | Archetype::Union
@@ -39,7 +49,9 @@ fn render_unknown<ADDR: funty::Integral>(
         }
         Archetype::Subroutine => "_".into(),
         Archetype::Unknown => "?".into(),
-    }
+    };
+
+    format!("{const_string}{volatile_string}{type_value_string}").normal()
 }
 
 fn render_tagged_union<ADDR: funty::Integral>(
