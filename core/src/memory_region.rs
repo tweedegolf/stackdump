@@ -103,6 +103,56 @@ impl<const SIZE: usize> ArrayMemoryRegion<SIZE> {
         self.data.set_len(data_len);
         self.data.as_mut_ptr().copy_from(data_ptr, data_len);
     }
+
+    /// Try to build a [ArrayMemoryRegion] from an [IntoIterator<Item = u8>]
+    pub fn try_from_iter<I: IntoIterator<Item = u8>>(
+        iter: I,
+    ) -> Result<Self, MemoryRegionFromIterError> {
+        use MemoryRegionFromIterError::*;
+        let mut iter = iter.into_iter();
+
+        match iter.next() {
+            Some(MEMORY_REGION_IDENTIFIER) => {}
+            Some(id) => return Err(InvalidIdentifier(id)),
+            None => return Err(NotEnoughItems),
+        }
+
+        let start_address = u64::from_le_bytes([
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+        ]);
+
+        let length = u64::from_le_bytes([
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+        ]);
+
+        if length > SIZE as u64 {
+            return Err(LengthTooBig(length));
+        }
+
+        // This call panics if length > SIZE
+        // and `iter` does indeed contain more than SIZE items,
+        // but we've just covered that case
+        let data = ArrayVec::from_iter(iter.take(length as usize));
+
+        Ok(Self {
+            start_address,
+            data,
+        })
+    }
 }
 
 #[cfg(feature = "std")]
@@ -134,42 +184,7 @@ impl<'a, const SIZE: usize> FromIterator<&'a u8> for ArrayMemoryRegion<SIZE> {
 
 impl<const SIZE: usize> FromIterator<u8> for ArrayMemoryRegion<SIZE> {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
-        let mut iter = iter.into_iter();
-
-        assert_eq!(
-            iter.next().unwrap(),
-            MEMORY_REGION_IDENTIFIER,
-            "The given iterator is not for a memory region"
-        );
-
-        let start_address = u64::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
-
-        let length = u64::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
-
-        let data = ArrayVec::from_iter(iter.take(length as usize));
-
-        Self {
-            start_address,
-            data,
-        }
+        Self::try_from_iter(iter).unwrap()
     }
 }
 
@@ -234,6 +249,49 @@ impl VecMemoryRegion {
 
         self.data.as_mut_ptr().copy_from(data_ptr, data_len);
     }
+
+    /// Try to build a [VecMemoryRegion] from an [IntoIterator<Item = u8>]
+    pub fn try_from_iter<I: IntoIterator<Item = u8>>(
+        iter: I,
+    ) -> Result<Self, MemoryRegionFromIterError> {
+        use MemoryRegionFromIterError::*;
+        let mut iter = iter.into_iter();
+
+        match iter.next() {
+            Some(MEMORY_REGION_IDENTIFIER) => {}
+            Some(id) => return Err(InvalidIdentifier(id)),
+            None => return Err(NotEnoughItems),
+        }
+
+        let start_address = u64::from_le_bytes([
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+        ]);
+
+        let length = u64::from_le_bytes([
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+            iter.next().ok_or(NotEnoughItems)?,
+        ]);
+
+        let data = Vec::from_iter(iter.take(length as usize));
+
+        Ok(Self {
+            start_address,
+            data,
+        })
+    }
 }
 
 #[cfg(feature = "std")]
@@ -267,42 +325,7 @@ impl<'a> FromIterator<&'a u8> for VecMemoryRegion {
 #[cfg(feature = "std")]
 impl FromIterator<u8> for VecMemoryRegion {
     fn from_iter<T: IntoIterator<Item = u8>>(iter: T) -> Self {
-        let mut iter = iter.into_iter();
-
-        assert_eq!(
-            iter.next().unwrap(),
-            MEMORY_REGION_IDENTIFIER,
-            "The given iterator is not for a memory region"
-        );
-
-        let start_address = u64::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
-
-        let length = u64::from_le_bytes([
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        ]);
-
-        let data = Vec::from_iter(iter.take(length as usize));
-
-        Self {
-            start_address,
-            data,
-        }
+        Self::try_from_iter(iter).unwrap()
     }
 }
 
@@ -432,6 +455,32 @@ impl<'a> Iterator for MemoryRegionIterator<'a> {
 }
 
 impl<'a> ExactSizeIterator for MemoryRegionIterator<'a> {}
+
+#[derive(Debug)]
+/// Specifies what went wrong building a [MemoryRegion] from an iterator
+pub enum MemoryRegionFromIterError {
+    /// The given iterator is not for a memory region.
+    /// First item from iterator yielded invalid identifier. Expected [MEMORY_REGION_IDENTIFIER]
+    InvalidIdentifier(u8),
+    /// Iterator specified length too big for declared region
+    LengthTooBig(u64),
+    /// Iterator did not yield enough items to build memory region
+    NotEnoughItems,
+}
+
+impl core::fmt::Display for MemoryRegionFromIterError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use MemoryRegionFromIterError::*;
+        match self {
+            InvalidIdentifier(id) => write!(f, "Iterator is not for a memory region. Started with {id}, expected {MEMORY_REGION_IDENTIFIER}"),
+            LengthTooBig(len) => write!(f, "Iterator specified length too big for declared region: {len}"),
+            NotEnoughItems => write!(f, "Iterator did not yield enough items to build memory region"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for MemoryRegionFromIterError {}
 
 #[cfg(test)]
 mod tests {
