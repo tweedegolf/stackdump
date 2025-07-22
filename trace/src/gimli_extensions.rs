@@ -62,6 +62,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub trait AttributeExt<R: Reader> {
     fn required_u8_value(&self) -> Result<u8, TraceError>;
     fn required_u16_value(&self) -> Result<u16, TraceError>;

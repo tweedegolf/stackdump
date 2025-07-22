@@ -3,12 +3,12 @@
 use super::{Platform, UnwindResult};
 use crate::error::TraceError;
 use crate::{Frame, FrameType};
-use addr2line::object::{Object, ObjectSection, ObjectSymbol};
 use core::ops::Range;
 use gimli::{
     BaseAddresses, CfaRule, DebugFrame, EndianSlice, LittleEndian, RegisterRule, RunTimeEndian,
     UnwindContext, UnwindSection, UnwindTableRow,
 };
+use object::{Object, ObjectSection, ObjectSymbol};
 use stackdump_core::device_memory::DeviceMemory;
 
 const THUMB_BIT: u32 = 1;
@@ -20,13 +20,13 @@ pub struct CortexMPlatform<'data> {
     reset_vector_address_range: Range<u32>,
     text_address_range: Range<u32>,
     bases: BaseAddresses,
-    unwind_context: UnwindContext<EndianSlice<'data, LittleEndian>>,
+    unwind_context: UnwindContext<usize>,
 }
 
 impl<'data> CortexMPlatform<'data> {
     fn apply_unwind_info(
         device_memory: &mut DeviceMemory<<Self as Platform<'data>>::Word>,
-        unwind_info: UnwindTableRow<EndianSlice<LittleEndian>>,
+        unwind_info: UnwindTableRow<usize>,
     ) -> Result<bool, TraceError> {
         let updated = match unwind_info.cfa() {
             CfaRule::RegisterAndOffset { register, offset } => {
@@ -157,7 +157,7 @@ impl<'data> CortexMPlatform<'data> {
 impl<'data> Platform<'data> for CortexMPlatform<'data> {
     type Word = u32;
 
-    fn create_context(elf: &addr2line::object::File<'data, &'data [u8]>) -> Result<Self, TraceError>
+    fn create_context(elf: &object::File<'data, &'data [u8]>) -> Result<Self, TraceError>
     where
         Self: Sized,
     {

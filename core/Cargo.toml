@@ -13,7 +13,7 @@ description = "Crate for stack dump definitions"
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false, features = ["serde"] }
 serde = { version = "1.0.136", default-features = false, features = ["derive"] }
-gimli = { version = "0.28.0", default-features = false }
+gimli = { version = "0.32.0", default-features = false }
 funty = { version = "2.0.0", default-features = false }
 
 [features]

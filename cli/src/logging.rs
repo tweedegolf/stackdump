@@ -3,8 +3,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use env_logger::fmt::{Color, Style, StyledValue};
-use log::Level;
+use env_logger::fmt::style::Style;
 
 pub fn init_logger() {
     env_logger::builder()
@@ -19,16 +18,20 @@ pub fn init_logger() {
 
             let max_width = max_target_width(&target);
 
-            let mut style = f.style();
-            let level = colored_level(&mut style, record.level());
+            let level_style = f.default_level_style(record.level());
 
-            let mut style = f.style();
-            let target = style.set_bold(true).value(Padded {
-                value: target,
-                width: max_width,
-            });
+            let target_style = Style::new().bold();
 
-            writeln!(f, " {} {} > {}", level, target, record.args())
+            writeln!(
+                f,
+                " {level_style}{}{level_style:#} {target_style}{}{target_style:#} > {}",
+                record.level().as_str(),
+                Padded {
+                    value: target,
+                    width: max_width,
+                },
+                record.args()
+            )
         })
         .init();
 }
@@ -41,15 +44,6 @@ struct Padded<T> {
 impl<T: fmt::Display> fmt::Display for Padded<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{: <width$}", self.value, width = self.width)
-    }
-}
-fn colored_level(style: &mut Style, level: Level) -> StyledValue<'_, &'static str> {
-    match level {
-        Level::Trace => style.set_color(Color::Magenta).value("TRACE"),
-        Level::Debug => style.set_color(Color::Blue).value("DEBUG"),
-        Level::Info => style.set_color(Color::Green).value("INFO "),
-        Level::Warn => style.set_color(Color::Yellow).value("WARN "),
-        Level::Error => style.set_color(Color::Red).value("ERROR"),
     }
 }
 

@@ -1,5 +1,9 @@
 use crate::Arguments;
-use probe_rs::{config::TargetSelector, DebugProbeSelector, Permissions, Probe, Session};
+use probe_rs::{
+    config::TargetSelector,
+    probe::{list::Lister, DebugProbeSelector},
+    Permissions, Session, SessionConfig,
+};
 use stackdump_capture_probe::StackdumpCapturer;
 use stackdump_trace::{
     platform::cortex_m::CortexMPlatform, stackdump_core::device_memory::DeviceMemory,
@@ -16,8 +20,10 @@ pub(crate) fn trace_probe(
     let elf_data = std::fs::read(elf_file)?;
 
     let mut session = match probe_selector {
-        Some(selector) => Probe::open(selector)?.attach(target_selector, Permissions::default())?,
-        None => Session::auto_attach(target_selector, Permissions::default())?,
+        Some(selector) => Lister::new()
+            .open(selector)?
+            .attach(target_selector, Permissions::default())?,
+        None => Session::auto_attach(target_selector, SessionConfig::default())?,
     };
     let mut core = session.core(core.unwrap_or(0))?;
 

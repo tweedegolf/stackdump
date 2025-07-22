@@ -71,7 +71,7 @@ impl<const SIZE: usize, RB: funty::Integral> ArrayRegisterData<SIZE, RB> {
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// ```
-    pub fn bytes(&self) -> RegisterDataBytesIterator<RB> {
+    pub fn bytes(&self) -> RegisterDataBytesIterator<'_, RB> {
         RegisterDataBytesIterator {
             index: 0,
             starting_register_number: self.starting_register_number,
@@ -197,7 +197,7 @@ impl<RB: funty::Integral> VecRegisterData<RB> {
     /// assert_eq!(regs1, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// assert_eq!(regs2, ArrayRegisterData::<4, u32>::from_iter(&mut intermediate_iter));
     /// ```
-    pub fn bytes(&self) -> RegisterDataBytesIterator<RB> {
+    pub fn bytes(&self) -> RegisterDataBytesIterator<'_, RB> {
         RegisterDataBytesIterator {
             index: 0,
             starting_register_number: self.starting_register_number,

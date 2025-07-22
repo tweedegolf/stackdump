@@ -1,6 +1,9 @@
 use std::env;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(cortex_m)");
+    println!("cargo::rustc-check-cfg=cfg(has_fpu)");
+
     let target = env::var("TARGET").unwrap();
 
     let is_cortex_m = target.starts_with("thumbv6m-")

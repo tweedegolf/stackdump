@@ -22,6 +22,11 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
         let starting_register = match self.0.get_mut().architecture() {
             probe_rs::Architecture::Arm => stackdump_core::gimli::Arm::R0,
             probe_rs::Architecture::Riscv => stackdump_core::gimli::RiscV::X0,
+            probe_rs::Architecture::Xtensa => {
+                return Err(probe_rs::Error::NotImplemented(
+                    "register capture for Xtensa",
+                ))
+            }
         };
 
         Ok(VecRegisterData::new(starting_register, register_data))
@@ -43,6 +48,11 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
                 let starting_register = match self.0.get_mut().architecture() {
                     probe_rs::Architecture::Arm => stackdump_core::gimli::Arm::S0,
                     probe_rs::Architecture::Riscv => stackdump_core::gimli::RiscV::F0,
+                    probe_rs::Architecture::Xtensa => {
+                        return Err(probe_rs::Error::NotImplemented(
+                            "register capture for Xtensa",
+                        ))
+                    }
                 };
 
                 Ok(Some(VecRegisterData::new(starting_register, register_data)))
