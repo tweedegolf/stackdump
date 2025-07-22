@@ -79,6 +79,21 @@ fn get_entry_name(
     }
 }
 
+/// Gets the string value from the `DW_AT_linkage_name` attribute of the given entry if it's present
+fn get_entry_linkage_name(
+    dwarf: &Dwarf<DefaultReader>,
+    unit: &Unit<DefaultReader, usize>,
+    entry: &DebuggingInformationEntry<DefaultReader, usize>,
+) -> Result<Option<String>, TraceError> {
+    // Find the attribute
+    let Some(linkage_name_attr) = entry.attr(gimli::constants::DW_AT_linkage_name)? else {
+        return Ok(None);
+    };
+
+    let attr_string = dwarf.attr_string(unit, linkage_name_attr.value())?;
+    Ok(Some(attr_string.to_string()?.into()))
+}
+
 /// If available, get the EntriesTree of the `DW_AT_abstract_origin` attribute of the given entry
 fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
     dwarf: &Dwarf<DefaultReader>,
@@ -270,7 +285,7 @@ where
     let frame_base_data = get_variable_data(
         device_memory,
         core::mem::size_of::<W>() as u64 * 8,
-        frame_base_location,
+        &frame_base_location,
     );
 
     Ok(frame_base_data.ok().map(|data| data.load_le()))
@@ -599,7 +614,7 @@ where
                 let entry_data = get_variable_data(
                     device_memory,
                     W::BITS as u64,
-                    VariableLocationResult::LocationsFound(entry_pieces),
+                    &VariableLocationResult::LocationsFound(entry_pieces),
                 )?;
 
                 result = evaluation.resume_with_entry_value(gimli::Value::Generic(
@@ -720,7 +735,7 @@ where
 fn get_variable_data<W: funty::Integral>(
     device_memory: &DeviceMemory<W>,
     variable_size: u64,
-    variable_location: VariableLocationResult,
+    variable_location: &VariableLocationResult,
 ) -> Result<BitVec<u8, Lsb0>, VariableDataError>
 where
     <W as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
@@ -756,6 +771,22 @@ where
         VariableLocationResult::LocationEvaluationStepNotImplemented(step) => Err(
             VariableDataError::UnimplementedLocationEvaluationStep(format!("{:?}", step)),
         ),
+    }
+}
+
+/// Returns the first found address in the location (if any)
+fn get_variable_address(variable_location: &VariableLocationResult) -> Option<u64> {
+    match variable_location {
+        VariableLocationResult::LocationsFound(pieces) => {
+            for piece in pieces {
+                match piece.location {
+                    gimli::Location::Address { address } => return Some(address),
+                    _ => {}
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 
@@ -1098,6 +1129,9 @@ where
         variable_name = Ok("param".into());
     }
 
+    // Get the name of the variable
+    let variable_linkage_name = get_entry_linkage_name(dwarf, unit, entry)?;
+
     // Get the type of the variable or its abstract origin
     get_entry_type_reference_tree_recursive!(
         variable_type_tree = (dwarf, unit, abbreviations, entry)
@@ -1138,7 +1172,7 @@ where
         parameter: entry.tag() == gimli::constants::DW_TAG_formal_parameter,
     };
 
-    // Get the location of the variable
+    // Get the (file) location of the variable
     let mut variable_file_location = find_entry_location(dwarf, unit, entry)?;
     if let (None, Some(abstract_origin_entry)) =
         (&variable_file_location.file, abstract_origin_entry)
@@ -1153,6 +1187,8 @@ where
                 kind: variable_kind,
                 type_value: variable_type_value_tree,
                 location: variable_file_location,
+                linkage_name: variable_linkage_name,
+                address: None, // We don't care about the address of a ZST
             }))
         }
         (Ok(variable_name), Ok(mut variable_type_value_tree)) => {
@@ -1174,7 +1210,7 @@ where
             let variable_data = get_variable_data(
                 device_memory,
                 variable_type_value_tree.data().bit_length(),
-                variable_location,
+                &variable_location,
             );
 
             match variable_data {
@@ -1199,6 +1235,8 @@ where
                 kind: variable_kind,
                 type_value: variable_type_value_tree,
                 location: variable_file_location,
+                linkage_name: variable_linkage_name,
+                address: get_variable_address(&variable_location),
             }))
         }
         (Ok(variable_name), Err(type_error)) => {

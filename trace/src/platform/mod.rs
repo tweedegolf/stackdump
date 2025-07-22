@@ -1,7 +1,7 @@
 use crate::{error::TraceError, type_value_tree::TypeValueTree, Frame, FrameType, Location};
 use funty::Fundamental;
 use gimli::{DebugInfoOffset, EndianRcSlice, RunTimeEndian};
-use object::{Object, ObjectSection, SectionKind};
+use object::{Object, ObjectSection, ObjectSymbol, SectionKind};
 use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion};
 use std::collections::HashMap;
 
@@ -161,8 +161,54 @@ where
     }
 
     // We're done with the stack data, but we can also decode the static variables and make a frame out of that
-    let static_variables =
+    let mut static_variables =
         crate::variables::find_static_variables(&dwarf, &device_memory, &mut type_cache)?;
+
+    // Filter out static variables that are not real (like defmt ones)
+    static_variables.retain(|var| {
+        let Some(linkage_name) = &var.linkage_name else {
+            // For some reason, some variables don't have a linkage name.
+            // So just show them, I guess?
+            return true;
+        };
+
+        if let Some(symbol) = elf.symbol_by_name(&linkage_name) {
+            if let Some(section_index) = symbol.section_index() {
+                match elf.section_by_index(section_index) {
+                    // Filter out all weird sections (including defmt)
+                    Ok(section) if section.kind() == SectionKind::Other => false,
+                    Ok(_section) => true,
+                    Err(e) => {
+                        log::error!("Could not get section by index: {e}");
+                        true
+                    }
+                }
+            } else {
+                // The symbol is not defined in a section?
+                // Idk man, just show it I guess
+                true
+            }
+        } else {
+            // We have a linkage name from debug info, but the symbol doesn't exist...
+            // There's two things that might be going on that I know about:
+            // 1. LTO ran and removed the symbol because it was never used.
+            // 2. LLVM merged some globals (including this one) into one symbol.
+            //
+            // If 1, we want to return false. If 2, we want to return true.
+
+            // For 1, if the variable has an address, it tends to be address 0 as far as I can see.
+            // This makes sense because it doesn't exist, and so doesn't have a 'real' address.
+
+            if var.address == None || var.address == Some(0) {
+                // We're likely in number 1 territory
+                false
+            } else {
+                // We _may_ be in number 2 territory
+                true
+            }
+        }
+    });
+
     let static_frame = Frame {
         function: "Static".into(),
         location: Location {
