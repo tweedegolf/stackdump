@@ -35,11 +35,11 @@ pub struct Location {
 impl Display for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(file) = self.file.clone() {
-            write!(f, "{}", file)?;
+            write!(f, "{file}")?;
             if let Some(line) = self.line {
-                write!(f, ":{}", line)?;
+                write!(f, ":{line}")?;
                 if let Some(column) = self.column {
-                    write!(f, ":{}", column)?;
+                    write!(f, ":{column}")?;
                 }
             }
         }
@@ -157,7 +157,7 @@ impl<ADDR: funty::Integral> Variable<ADDR> {
     pub fn display(&self, theme: Theme) -> String {
         let mut kind_text = self.kind.to_string();
         if !kind_text.is_empty() {
-            kind_text = theme.color_info(format!("({}) ", kind_text)).to_string();
+            kind_text = theme.color_info(format!("({kind_text}) ")).to_string();
         }
 
         let mut location_text = self.location.to_string();

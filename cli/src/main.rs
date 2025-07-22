@@ -118,7 +118,7 @@ fn result_main() -> Result<(), Box<dyn Error>> {
 
 pub(crate) fn print_frames(frames: Vec<stackdump_trace::Frame<u32>>, args: &Arguments) {
     for (i, frame) in frames.iter().enumerate() {
-        print!("{}: ", i);
+        print!("{i}: ");
 
         let frame_text = frame.display(
             true,

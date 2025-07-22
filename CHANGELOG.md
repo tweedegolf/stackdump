@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Updated a boatload of dependencies
+- Started filtering many useless variables from the list of static variables
+  - This means this isn't spammed full with defmt stuff anymore
+
 ## Cli 0.1.8, Capture 0.5.0, Core 0.4.0, Trace 0.4.0, Capture-probe 0.4.0 (21-08-23)
 
 - Updated gimli to 0.28

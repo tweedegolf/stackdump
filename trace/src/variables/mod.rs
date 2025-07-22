@@ -68,11 +68,11 @@ fn get_entry_name(
             }
             Err(_) if entry.tag() == gimli::constants::DW_TAG_array_type => {
                 // Arrays can be anonymous
-                return Ok("array".into());
+                Ok("array".into())
             }
             Err(_) if entry.tag() == gimli::constants::DW_TAG_subroutine_type => {
                 // Subroutines can be anonymous
-                return Ok("subroutine".into());
+                Ok("subroutine".into())
             }
             Err(e) => Err(e),
         }
@@ -141,7 +141,7 @@ fn get_entry_abstract_origin_reference_tree<'abbrev, 'unit>(
             TraceError::WrongAttributeValueType {
                 attribute_name: abstract_origin_attr.name().to_string(),
                 expected_type_name: "UnitRef or DebugInfoRef",
-                gotten_value: format!("{:X?}", value),
+                gotten_value: format!("{value:X?}"),
             },
         )),
     }
@@ -194,7 +194,7 @@ fn get_entry_type_reference_tree<'abbrev, 'unit>(
             TraceError::WrongAttributeValueType {
                 attribute_name: type_attr.name().to_string(),
                 expected_type_name: "UnitRef or DebugInfoRef",
-                gotten_value: format!("{:X?}", value),
+                gotten_value: format!("{value:X?}"),
             },
         )),
     }
@@ -206,7 +206,7 @@ pub(crate) enum GetEntryTreeError {
 }
 
 impl GetEntryTreeError {
-    fn as_trace_error(self) -> TraceError {
+    fn into_trace_error(self) -> TraceError {
         match self {
             Self::TraceError(e) => e,
             Self::WrongUnit(_) => TraceError::UnitNotFoundAgain,
@@ -225,9 +225,9 @@ macro_rules! get_entry_abstract_origin_reference_tree_recursive {
             $abbreviations,
             $entry,
         ) {
-            Err(crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
+            Err($crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
                 __unit_header = target_unit;
-                crate::variables::get_entry_abstract_origin_reference_tree(
+                $crate::variables::get_entry_abstract_origin_reference_tree(
                     $dwarf,
                     &__unit_header,
                     $abbreviations,
@@ -236,7 +236,7 @@ macro_rules! get_entry_abstract_origin_reference_tree_recursive {
             }
             value => value,
         }
-        .map_err(|e| e.as_trace_error());
+        .map_err(|e| e.into_trace_error());
     };
 }
 
@@ -251,9 +251,9 @@ macro_rules! get_entry_type_reference_tree_recursive {
             $abbreviations,
             $entry,
         ) {
-            Err(crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
+            Err($crate::variables::GetEntryTreeError::WrongUnit(target_unit)) => {
                 __unit_header = target_unit;
-                crate::variables::get_entry_type_reference_tree(
+                $crate::variables::get_entry_type_reference_tree(
                     $dwarf,
                     &__unit_header,
                     $abbreviations,
@@ -262,7 +262,7 @@ macro_rules! get_entry_type_reference_tree_recursive {
             }
             value => value,
         }
-        .map_err(|e| e.as_trace_error());
+        .map_err(|e| e.into_trace_error());
     };
 }
 
@@ -503,7 +503,7 @@ fn build_type_value_tree<W: funty::Integral>(
 /// Runs the location evaluation of gimli.
 ///
 /// - `location`: The `DW_AT_location` attribute value of the entry of the variable we want to get the location of.
-/// This may be a None if the variable has no location attribute.
+///   This may be a None if the variable has no location attribute.
 fn evaluate_location<W: funty::Integral>(
     dwarf: &Dwarf<DefaultReader>,
     unit: &Unit<DefaultReader, usize>,
@@ -581,7 +581,7 @@ where
     // The evaluation stops when it requires some memory that we need to provide.
     let mut result = evaluation.evaluate()?;
     while result != EvaluationResult::Complete {
-        log::trace!("Location evaluation result: {:?}", result);
+        log::trace!("Location evaluation result: {result:?}");
         match result {
             EvaluationResult::RequiresRegister {
                 register,
@@ -752,7 +752,7 @@ where
 
             // Get all the data of the pieces
             for piece in pieces {
-                let piece_data = get_piece_data(device_memory, &piece, variable_size_bytes)?;
+                let piece_data = get_piece_data(device_memory, piece, variable_size_bytes)?;
 
                 if let Some(mut piece_data) = piece_data {
                     // TODO: Is this always in sequential order? We now assume that it is
@@ -769,7 +769,7 @@ where
             Ok(data)
         }
         VariableLocationResult::LocationEvaluationStepNotImplemented(step) => Err(
-            VariableDataError::UnimplementedLocationEvaluationStep(format!("{:?}", step)),
+            VariableDataError::UnimplementedLocationEvaluationStep(format!("{step:?}")),
         ),
     }
 }
@@ -779,9 +779,8 @@ fn get_variable_address(variable_location: &VariableLocationResult) -> Option<u6
     match variable_location {
         VariableLocationResult::LocationsFound(pieces) => {
             for piece in pieces {
-                match piece.location {
-                    gimli::Location::Address { address } => return Some(address),
-                    _ => {}
+                if let gimli::Location::Address { address } = piece.location {
+                    return Some(address);
                 }
             }
             None

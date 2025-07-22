@@ -296,8 +296,7 @@ impl<'data> Platform<'data> for CortexMPlatform<'data> {
                                 column: None,
                             },
                             frame_type: FrameType::Corrupted(format!(
-                                "Could not read address {:#10X} from the stack",
-                                address
+                                "Could not read address {address:#10X} from the stack"
                             )),
                             variables: Vec::new(),
                         }),

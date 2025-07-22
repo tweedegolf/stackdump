@@ -317,7 +317,7 @@ impl<'a, RB: funty::Integral> Iterator for RegisterDataBytesIterator<'a, RB> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining_length = 5 + self.registers.len() * core::mem::size_of::<RB>() - self.index;
+        let remaining_length = 5 + std::mem::size_of_val(self.registers) - self.index;
         (remaining_length, Some(remaining_length))
     }
 }

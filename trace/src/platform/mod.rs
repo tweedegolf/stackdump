@@ -43,12 +43,12 @@ pub trait Platform<'data> {
 /// Create the stacktrace for the given platform.
 ///
 /// - device_memory: All the captured memory of the device.
-/// It is not necessary to include any data that is present in the elf file because that will automatically be added.
-/// It is required to have a decent chunk of the stack present. If not all of the stack is present,
-/// then eventually the tracing procedure will find a corrupt frame.
-/// The standard set of registers is also required to be present.
+///   It is not necessary to include any data that is present in the elf file because that will automatically be added.
+///   It is required to have a decent chunk of the stack present. If not all of the stack is present,
+///   then eventually the tracing procedure will find a corrupt frame.
+///   The standard set of registers is also required to be present.
 /// - elf_data: The raw bytes of the elf file.
-/// This must be the exact same elf file as the one the device was running. Even a recompilation of the exact same code can change the debug info.
+///   This must be the exact same elf file as the one the device was running. Even a recompilation of the exact same code can change the debug info.
 pub fn trace<'data, P: Platform<'data>>(
     mut device_memory: DeviceMemory<P::Word>,
     elf_data: &'data [u8],
@@ -172,7 +172,7 @@ where
             return true;
         };
 
-        if let Some(symbol) = elf.symbol_by_name(&linkage_name) {
+        if let Some(symbol) = elf.symbol_by_name(linkage_name) {
             if let Some(section_index) = symbol.section_index() {
                 match elf.section_by_index(section_index) {
                     // Filter out all weird sections (including defmt)
@@ -199,7 +199,7 @@ where
             // For 1, if the variable has an address, it tends to be address 0 as far as I can see.
             // This makes sense because it doesn't exist, and so doesn't have a 'real' address.
 
-            if var.address == None || var.address == Some(0) {
+            if var.address.is_none() || var.address == Some(0) {
                 // We're likely in number 1 territory
                 false
             } else {
