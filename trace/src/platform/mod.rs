@@ -1,7 +1,7 @@
 use crate::{error::TraceError, type_value_tree::TypeValueTree, Frame, FrameType, Location};
-use addr2line::object::{Object, ObjectSection, SectionKind};
 use funty::Fundamental;
 use gimli::{DebugInfoOffset, EndianRcSlice, RunTimeEndian};
+use object::{Object, ObjectSection, SectionKind};
 use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion};
 use std::collections::HashMap;
 
@@ -23,9 +23,7 @@ pub enum UnwindResult<ADDR: funty::Integral> {
 pub trait Platform<'data> {
     type Word: funty::Integral;
 
-    fn create_context(
-        elf: &addr2line::object::File<'data, &'data [u8]>,
-    ) -> Result<Self, TraceError>
+    fn create_context(elf: &object::File<'data, &'data [u8]>) -> Result<Self, TraceError>
     where
         Self: Sized;
 
@@ -59,7 +57,7 @@ where
     <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
 {
     // Parse the elf data
-    let elf = addr2line::object::File::parse(elf_data)?;
+    let elf = object::File::parse(elf_data)?;
 
     // Add all relevant memory sections present in the elf file to the device memory
     for section in elf.sections().filter(|section| {
@@ -86,7 +84,7 @@ where
         endian: Endian,
     ) -> Result<gimli::EndianRcSlice<Endian>, TraceError>
     where
-        O: addr2line::object::Object<'data, 'file>,
+        O: object::Object<'data>,
         Endian: gimli::Endianity,
     {
         let data = file
@@ -196,7 +194,7 @@ where
         .skip_all_loads()?;
 
     // Get the debug compilation unit of the current register context
-    let (dwarf, unit) = addr2line_context
+    let unit_ref = addr2line_context
         .find_dwarf_and_unit(device_memory.register(gimli::Arm::PC)?.as_u64())
         .skip_all_loads()
         .ok_or(TraceError::DwarfUnitNotFound {
@@ -204,7 +202,7 @@ where
         })?;
 
     // Get the abbreviations of the unit
-    let abbreviations = dwarf.abbreviations(&unit.header)?;
+    let abbreviations = unit_ref.dwarf.abbreviations(&unit_ref.header)?;
 
     // Loop through the found frames and add them
     let mut added_frames = 0;
@@ -223,7 +221,10 @@ where
         let mut variables = Vec::new();
 
         if let Some(die_offset) = context_frame.dw_die_offset {
-            let mut entries = match unit.header.entries_tree(&abbreviations, Some(die_offset)) {
+            let mut entries = match unit_ref
+                .header
+                .entries_tree(&abbreviations, Some(die_offset))
+            {
                 Ok(entries) => entries,
                 Err(_) => {
                     continue;
@@ -232,8 +233,8 @@ where
 
             if let Ok(entry_root) = entries.root() {
                 variables = crate::variables::find_variables_in_function(
-                    dwarf,
-                    unit,
+                    unit_ref.dwarf,
+                    unit_ref.unit,
                     &abbreviations,
                     device_memory,
                     entry_root,

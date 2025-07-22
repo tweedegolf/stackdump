@@ -16,7 +16,7 @@ pub enum TraceError {
     #[error("The elf file does not contain the required `{0}` section")]
     MissingElfSection(String),
     #[error("The elf file could not be read: {0}")]
-    ObjectReadError(#[from] addr2line::object::Error),
+    ObjectReadError(#[from] object::Error),
     #[error("An IO error occured: {0}")]
     IOError(Rc<std::io::Error>),
     #[error("Some memory could not be read: {0}")]

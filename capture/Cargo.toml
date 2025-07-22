@@ -2,7 +2,7 @@
 name = "stackdump-capture"
 version = "0.5.0"
 edition = "2021"
-rust-version = "1.59"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
 repository = "https://github.com/tweedegolf/stackdump"

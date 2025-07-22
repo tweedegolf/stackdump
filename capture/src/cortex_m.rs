@@ -139,7 +139,7 @@ fn capture_stack<const SIZE: usize>(stack_pointer: u32, stack: &mut ArrayMemoryR
     /// Get the start address of the stack. The stack grows to lower addresses,
     /// so this should be the highest stack address you can get.
     fn stack_start() -> u32 {
-        unsafe { &_stack_start as *const _ as u32 }
+        &raw const _stack_start as u32
     }
 
     let stack_size = stack_start().saturating_sub(stack_pointer).min(SIZE as u32);

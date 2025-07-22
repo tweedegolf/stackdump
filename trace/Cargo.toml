@@ -11,8 +11,9 @@ categories = ["embedded"]
 description = "Crate for tracing stack dumps"
 
 [dependencies]
-addr2line = "0.21.0"
-gimli = "0.28.0"
+addr2line = "0.25.0"
+gimli = "0.32.0"
+object = "0.37.1"
 bitvec = "1.0.0"
 stackdump-core = { version = "0.4.0", path = "../core" }
 thiserror = "1.0.30"

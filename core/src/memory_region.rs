@@ -82,7 +82,7 @@ impl<const SIZE: usize> ArrayMemoryRegion<SIZE> {
     /// assert_eq!(region1, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// assert_eq!(region2, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// ```
-    pub fn bytes(&self) -> MemoryRegionIterator {
+    pub fn bytes(&self) -> MemoryRegionIterator<'_> {
         MemoryRegionIterator::new(self.start_address, &self.data)
     }
 
@@ -215,7 +215,7 @@ impl VecMemoryRegion {
     /// assert_eq!(region1, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// assert_eq!(region2, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// ```
-    pub fn bytes(&self) -> MemoryRegionIterator {
+    pub fn bytes(&self) -> MemoryRegionIterator<'_> {
         MemoryRegionIterator::new(self.start_address, &self.data)
     }
 
@@ -342,7 +342,7 @@ impl<'a> SliceMemoryRegion<'a> {
     /// assert_eq!(region1, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// assert_eq!(region2, ArrayMemoryRegion::<4>::from_iter(&mut intermediate_iter));
     /// ```
-    pub fn bytes(&self) -> MemoryRegionIterator {
+    pub fn bytes(&self) -> MemoryRegionIterator<'_> {
         let start_address = self.data.as_ptr() as u64;
         MemoryRegionIterator::new(start_address, self.data)
     }
