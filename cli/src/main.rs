@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use probe::trace_probe;
-use probe_rs::DebugProbeSelector;
+use probe_rs::probe::DebugProbeSelector;
 use stackdump_trace::{
     platform::cortex_m::CortexMPlatform,
     render_colors::Theme,

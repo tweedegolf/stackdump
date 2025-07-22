@@ -17,8 +17,8 @@ description = "Crate for capturing stack dumps"
 clap = { version = "4.2.1", features = ["derive", "color", "suggestions"] }
 stackdump-trace = { version = "0.4.0", path = "../trace" }
 stackdump-capture-probe = { version = "0.4.0", path = "../capture-probe" }
-env_logger = "0.10"
+env_logger = "0.11.8"
 log = "0.4.14"
 textwrap = { version = "0.16.0", features = ["terminal_size"] }
-colored = "2"
-probe-rs = "0.20.0"
+colored = "3.0.0"
+probe-rs = "0.29.1"
