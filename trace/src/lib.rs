@@ -147,6 +147,10 @@ pub struct Variable<ADDR: funty::Integral> {
     pub type_value: TypeValueTree<ADDR>,
     /// The code location of where this variable is declared
     pub location: Location,
+    /// The linkage name of the variable (if specified in the debug info)
+    pub linkage_name: Option<String>,
+    /// The address of the variable (if it's specified in the debug info (and is simple as an address))
+    pub address: Option<u64>,
 }
 
 impl<ADDR: funty::Integral> Variable<ADDR> {
