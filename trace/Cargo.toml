@@ -15,7 +15,7 @@ addr2line = "0.25.0"
 gimli = "0.32.0"
 object = "0.37.1"
 bitvec = "1.0.0"
-stackdump-core = { version = "0.10.0", path = "../core" }
+stackdump-core = { version = "0.10.1", path = "../core" }
 thiserror = "2.0.12"
 log = "0.4.14"
 trees = "0.4.2"

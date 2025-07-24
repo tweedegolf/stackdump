@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.1 (24-07-25)
+
+- Fix accidental use of std
+
 ## 0.10.0 (24-07-25)
 
 - Updated a boatload of dependencies
