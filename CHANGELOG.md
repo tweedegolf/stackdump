@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## 0.10.0 (24-07-25)
+
 - Updated a boatload of dependencies
 - Started filtering many useless variables from the list of static variables
   - This means this isn't spammed full with defmt stuff anymore
+- All subcrates now use the same version
 
 ## Cli 0.1.8, Capture 0.5.0, Core 0.4.0, Trace 0.4.0, Capture-probe 0.4.0 (21-08-23)
 

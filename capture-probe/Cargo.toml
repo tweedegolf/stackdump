@@ -1,6 +1,6 @@
 [package]
 name = "stackdump-capture-probe"
-version = "0.4.0"
+version.workspace = true
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/tweedegolf/stackdump"
@@ -14,5 +14,5 @@ description = "Crate for capturing stack dumps of embedded devices with a debugg
 
 [dependencies]
 probe-rs = "0.29.1"
-stackdump-core = { version = "0.4.0", path = "../core" }
+stackdump-core = { version = "0.10.0", path = "../core" }
 
