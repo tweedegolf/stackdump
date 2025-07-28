@@ -9,6 +9,9 @@ pub const MEMORY_REGION_IDENTIFIER: u8 = 0x01;
 /// A collection of bytes that capture a memory region
 #[cfg(feature = "std")]
 pub trait MemoryRegion {
+    /// Get the address range of this region
+    fn range(&self) -> std::ops::Range<u64>;
+
     /// Returns the slice of memory that can be found at the given address_range.
     /// If the given address range is not fully within the captured region, then None is returned.
     fn read(
@@ -107,6 +110,10 @@ impl<const SIZE: usize> ArrayMemoryRegion<SIZE> {
 
 #[cfg(feature = "std")]
 impl<const SIZE: usize> MemoryRegion for ArrayMemoryRegion<SIZE> {
+    fn range(&self) -> std::ops::Range<u64> {
+        self.start_address..self.start_address + self.data.len() as u64
+    }
+
     fn read(
         &self,
         index: core::ops::Range<u64>,
@@ -238,6 +245,10 @@ impl VecMemoryRegion {
 
 #[cfg(feature = "std")]
 impl MemoryRegion for VecMemoryRegion {
+    fn range(&self) -> std::ops::Range<u64> {
+        self.start_address..self.start_address + self.data.len() as u64
+    }
+
     fn read(
         &self,
         index: core::ops::Range<u64>,
@@ -364,6 +375,11 @@ impl<'a> SliceMemoryRegion<'a> {
 
 #[cfg(feature = "std")]
 impl<'a> MemoryRegion for SliceMemoryRegion<'a> {
+    fn range(&self) -> std::ops::Range<u64> {
+        let range = self.data.as_ptr_range();
+        range.start as u64..range.end as u64
+    }
+
     fn read(
         &self,
         index: core::ops::Range<u64>,

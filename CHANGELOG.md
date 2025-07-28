@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix small crash when evaluating a variable location.
+  - Now it will accurately report that the memory doesn't exist instead of returning an error.
+- *Breaking*: Add range to memory region
+
 ## 0.10.1 (24-07-25)
 
 - Fix accidental use of std

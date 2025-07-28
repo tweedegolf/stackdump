@@ -234,18 +234,16 @@ fn add_current_frames<'a, P: Platform<'a>>(
 where
     <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
 {
+    let pc = device_memory.register(gimli::Arm::PC)?.as_u64();
+
     // Find the frames of the current register context
-    let mut context_frames = addr2line_context
-        .find_frames(device_memory.register(gimli::Arm::PC)?.as_u64())
-        .skip_all_loads()?;
+    let mut context_frames = addr2line_context.find_frames(pc).skip_all_loads()?;
 
     // Get the debug compilation unit of the current register context
     let unit_ref = addr2line_context
-        .find_dwarf_and_unit(device_memory.register(gimli::Arm::PC)?.as_u64())
+        .find_dwarf_and_unit(pc)
         .skip_all_loads()
-        .ok_or(TraceError::DwarfUnitNotFound {
-            pc: device_memory.register(gimli::Arm::PC)?.as_u64(),
-        })?;
+        .ok_or(TraceError::DwarfUnitNotFound { pc })?;
 
     // Get the abbreviations of the unit
     let abbreviations = unit_ref.dwarf.abbreviations(&unit_ref.header)?;

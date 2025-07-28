@@ -560,6 +560,7 @@ where
         Err(TraceError::LocationEvaluationStepNotImplemented(step)) => {
             Ok(VariableLocationResult::LocationEvaluationStepNotImplemented(step))
         }
+        Err(TraceError::MissingMemory(_)) => Ok(VariableLocationResult::NoLocationFound),
         Err(e) => Err(e),
         Ok(pieces) if pieces.is_empty() => Ok(VariableLocationResult::NoLocationFound),
         Ok(pieces) => Ok(VariableLocationResult::LocationsFound(pieces)),
