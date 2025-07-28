@@ -5,6 +5,7 @@
 - Fix small crash when evaluating a variable location.
   - Now it will accurately report that the memory doesn't exist instead of returning an error.
 - *Breaking*: Add range to memory region
+- Fix issue where arrays and maybe some objects always looked at the first couple of data bits instead of the correct position
 
 ## 0.10.1 (24-07-25)
 

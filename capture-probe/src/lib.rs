@@ -63,13 +63,16 @@ impl<'a, 'probe> StackdumpCapturer<'a, 'probe> {
 }
 
 impl<'a, 'probe> MemoryRegion for StackdumpCapturer<'a, 'probe> {
+    fn range(&self) -> std::ops::Range<u64> {
+        0..u64::MAX // Any memory that is out there is available to us
+    }
+
     fn read(
         &self,
         address_range: std::ops::Range<u64>,
     ) -> Result<Option<Vec<u8>>, MemoryReadError> {
         let mut buffer = vec![0; address_range.clone().count()];
 
-        // Truncating to u32 is alright because probe-rs only supports 32-bit devices
         match self
             .0
             .borrow_mut()

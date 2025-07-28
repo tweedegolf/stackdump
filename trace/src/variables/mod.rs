@@ -914,8 +914,11 @@ fn read_variable_data<W: funty::Integral>(
             // Every member of this object is a child in the tree.
             // We simply need to read every child.
 
-            for child in variable.iter_mut() {
-                read_variable_data(child, data, device_memory, type_cache);
+            for mut child in variable.iter_mut() {
+                let child_data = &data[child.data().bit_range_usize()];
+                let range = child.data().bit_range.clone();
+                child.data_mut().bit_range = 0..range.end - range.start;
+                read_variable_data(child, child_data, device_memory, type_cache);
             }
 
             if &variable.data().variable_type.name == "&str" {
@@ -1051,7 +1054,12 @@ fn read_variable_data<W: funty::Integral>(
             // The tree has all children that we have to read. These are the elements of the array
             for mut element in variable.iter_mut() {
                 match data.get(element.data().bit_range_usize()) {
-                    Some(_) => read_variable_data(element, data, device_memory, type_cache),
+                    Some(data) => {
+                        let element_bitrange = element.data().bit_range.clone();
+                        element.data_mut().bit_range =
+                            0..element_bitrange.end - element_bitrange.start;
+                        read_variable_data(element, data, device_memory, type_cache)
+                    }
                     None => {
                         element.data_mut().variable_value = Err(VariableDataError::NoDataAvailable)
                     }
