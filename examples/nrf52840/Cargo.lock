@@ -388,7 +388,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stackdump-capture"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "arrayvec",
  "stackdump-core",
@@ -396,7 +396,7 @@ dependencies = [
 
 [[package]]
 name = "stackdump-core"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "arrayvec",
  "funty",

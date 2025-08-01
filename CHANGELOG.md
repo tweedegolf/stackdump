@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.3 (01-08-25)
+
+- Fix panic where a data slice was indexed out of range
+
 ## 0.10.2 (01-08-25)
 
 - Fix small crash when evaluating a variable location.

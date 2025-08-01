@@ -915,7 +915,11 @@ fn read_variable_data<W: funty::Integral>(
             // We simply need to read every child.
 
             for mut child in variable.iter_mut() {
-                let child_data = &data[child.data().bit_range_usize()];
+                let child_data = match data.get(child.data().bit_range_usize()) {
+                    Some(child_data) => child_data,
+                    None => BitSlice::empty(),
+                };
+
                 let range = child.data().bit_range.clone();
                 child.data_mut().bit_range = 0..range.end - range.start;
                 read_variable_data(child, child_data, device_memory, type_cache);
