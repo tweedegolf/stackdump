@@ -12,5 +12,5 @@ categories = ["embedded", "no-std"]
 description = "Crate for capturing stack dumps"
 
 [dependencies]
-stackdump-core = { version = "0.10.1", path = "../core", default-features = false }
+stackdump-core = { version = "0.10.2", path = "../core", default-features = false }
 arrayvec = { version = "0.7.2", default-features = false }

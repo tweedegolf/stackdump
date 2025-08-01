@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.10.2 (01-08-25)
+
 - Fix small crash when evaluating a variable location.
   - Now it will accurately report that the memory doesn't exist instead of returning an error.
 - *Breaking*: Add range to memory region
