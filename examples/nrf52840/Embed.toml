@@ -20,14 +20,12 @@ connect_under_reset = false
 enabled = true
 # A list of channel associations to be displayed. If left empty, all channels are displayed.
 # formats are: String, Defmt, BinaryLE,
-channels = [
-    { up = 0, name = "logs", format = "String" },
-    { up = 1, name = "dump", format = "BinaryLE" },
+up_channels = [
+    { channel = 0, name = "logs", format = "String" },
+    { channel = 1, name = "dump", format = "BinaryLE" },
 ]
 # The duration in ms for which the logger should retry to attach to RTT.
 timeout = 3000
-# Whether timestamps in the RTTUI are enabled
-show_timestamps = true
 # Whether to save rtt history buffer on exit.
 log_enabled = true
 # Where to save rtt history buffer relative to manifest path.

@@ -81,10 +81,26 @@ pub enum TraceError {
     LocationEvaluationStepNotImplemented(Rc<EvaluationResult<DefaultReader>>),
     #[error("A variable couldn't be read: {0}")]
     VariableDataError(#[from] VariableDataError),
+    #[error("An error from the probe-rs-debug crate: {0}")]
+    ProbeRsDebugError(Rc<probe_rs_debug::DebugError>),
+    #[error("An error from the probe-rs crate: {0}")]
+    ProbeRsError(Rc<probe_rs::Error>),
 }
 
 impl From<std::io::Error> for TraceError {
     fn from(e: std::io::Error) -> Self {
         Self::IOError(Rc::new(e))
+    }
+}
+
+impl From<probe_rs_debug::DebugError> for TraceError {
+    fn from(e: probe_rs_debug::DebugError) -> Self {
+        Self::ProbeRsDebugError(Rc::new(e))
+    }
+}
+
+impl From<probe_rs::Error> for TraceError {
+    fn from(e: probe_rs::Error) -> Self {
+        Self::ProbeRsError(Rc::new(e))
     }
 }

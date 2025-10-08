@@ -4,13 +4,29 @@ version = 4
 
 [[package]]
 name = "addr2line"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfbe277e56a376000877090da837660b4427aad530e3028d44e0bffe4f89a1c1"
+dependencies = [
+ "cpp_demangle",
+ "fallible-iterator",
+ "gimli 0.31.1",
+ "memmap2",
+ "object 0.36.7",
+ "rustc-demangle",
+ "smallvec",
+ "typed-arena",
+]
+
+[[package]]
+name = "addr2line"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9acbfca36652500c911ddb767ed433e3ed99b032b5d935be73c6923662db1d43"
 dependencies = [
  "cpp_demangle",
  "fallible-iterator",
- "gimli",
+ "gimli 0.32.0",
  "memmap2",
  "object 0.37.1",
  "rustc-demangle",
@@ -602,7 +618,7 @@ dependencies = [
  "deku",
  "heapless",
  "md5",
- "parse_int",
+ "parse_int 0.6.0",
  "regex",
  "serde",
  "serde_plain",
@@ -725,6 +741,17 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+]
+
+[[package]]
+name = "gimli"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
+dependencies = [
+ "fallible-iterator",
+ "indexmap",
+ "stable_deref_trait",
 ]
 
 [[package]]
@@ -1206,7 +1233,9 @@ version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
 dependencies = [
+ "flate2",
  "memchr",
+ "ruzstd 0.7.3",
 ]
 
 [[package]]
@@ -1217,7 +1246,7 @@ checksum = "03fd943161069e1768b4b3d050890ba48730e590f57e56d4aa04e7e090e61b4a"
 dependencies = [
  "flate2",
  "memchr",
- "ruzstd",
+ "ruzstd 0.8.1",
 ]
 
 [[package]]
@@ -1266,6 +1295,15 @@ name = "parse_int"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d695b79916a2c08bcff7be7647ab60d1402885265005a6658ffe6d763553c5a"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "parse_int"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c464266693329dd5a8715098c7f86e6c5fd5d985018b8318f53d9c6c2b21a31"
 dependencies = [
  "num-traits",
 ]
@@ -1417,6 +1455,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "probe-rs-debug"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4c21a81fa1d3819e0235a11bb3c943f077ee7232225ed4c9afc2054f68a9114"
+dependencies = [
+ "addr2line 0.24.2",
+ "bitfield",
+ "gimli 0.31.1",
+ "itertools",
+ "object 0.36.7",
+ "parse_int 0.9.0",
+ "probe-rs",
+ "probe-rs-target",
+ "serde",
+ "thiserror 2.0.12",
+ "tracing",
+ "typed-path",
+]
+
+[[package]]
 name = "probe-rs-target"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1564,11 +1622,20 @@ checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
 
 [[package]]
 name = "ruzstd"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fad02996bfc73da3e301efe90b1837be9ed8f4a462b6ed410aa35d00381de89f"
+dependencies = [
+ "twox-hash 1.6.3",
+]
+
+[[package]]
+name = "ruzstd"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3640bec8aad418d7d03c72ea2de10d5c646a598f9883c7babc160d91e3c1b26c"
 dependencies = [
- "twox-hash",
+ "twox-hash 2.1.1",
 ]
 
 [[package]]
@@ -1772,7 +1839,7 @@ version = "0.10.3"
 dependencies = [
  "arrayvec",
  "funty",
- "gimli",
+ "gimli 0.32.0",
  "serde",
 ]
 
@@ -1780,14 +1847,16 @@ dependencies = [
 name = "stackdump-trace"
 version = "0.10.3"
 dependencies = [
- "addr2line",
+ "addr2line 0.25.0",
  "bitvec",
  "colored 3.0.0",
  "funty",
- "gimli",
+ "gimli 0.32.0",
  "log",
  "object 0.37.1",
  "phf",
+ "probe-rs",
+ "probe-rs-debug",
  "simple_logger",
  "stackdump-core",
  "strum 0.27.2",
@@ -1795,6 +1864,12 @@ dependencies = [
  "thiserror 2.0.12",
  "trees",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strsim"
@@ -2048,6 +2123,16 @@ checksum = "0de5f738ceab88e2491a94ddc33c3feeadfa95fedc60363ef110845df12f3878"
 
 [[package]]
 name = "twox-hash"
+version = "1.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
+dependencies = [
+ "cfg-if",
+ "static_assertions",
+]
+
+[[package]]
+name = "twox-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b907da542cbced5261bd3256de1b3a1bf340a3d37f93425a07362a1d687de56"
@@ -2057,6 +2142,12 @@ name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
+
+[[package]]
+name = "typed-path"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c462d18470a2857aa657d338af5fa67170bb48bcc80a296710ce3b0802a32566"
 
 [[package]]
 name = "typenum"

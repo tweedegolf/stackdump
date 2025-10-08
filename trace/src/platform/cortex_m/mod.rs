@@ -5,10 +5,14 @@ use crate::error::TraceError;
 use crate::{Frame, FrameType};
 use core::ops::Range;
 use gimli::{
-    BaseAddresses, CfaRule, DebugFrame, EndianSlice, LittleEndian, RegisterRule, RunTimeEndian,
-    UnwindContext, UnwindSection, UnwindTableRow,
+    BaseAddresses, CfaRule, DebugFrame, EndianSlice, LittleEndian, Register, RegisterRule,
+    RunTimeEndian, UnwindContext, UnwindSection, UnwindTableRow,
 };
 use object::{Object, ObjectSection, ObjectSymbol};
+use probe_rs::architecture::arm::core::registers::cortex_m::{
+    CORTEX_M_CORE_REGISTERS, CORTEX_M_WITH_FP_CORE_REGISTERS,
+};
+use probe_rs_debug::DebugRegister;
 use stackdump_core::device_memory::DeviceMemory;
 
 const THUMB_BIT: u32 = 1;
@@ -343,5 +347,39 @@ impl<'data> Platform<'data> for CortexMPlatform<'data> {
                 Ok(UnwindResult::Proceeded)
             }
         }
+    }
+
+    fn get_registers(memory: &mut DeviceMemory<'_, Self::Word>) -> probe_rs_debug::DebugRegisters {
+        let registers = if memory.register(gimli::Arm::S0).is_ok() {
+            &CORTEX_M_CORE_REGISTERS
+        } else {
+            &CORTEX_M_WITH_FP_CORE_REGISTERS
+        };
+
+        probe_rs_debug::DebugRegisters(
+            registers
+                .all_registers()
+                .map(|r| DebugRegister {
+                    core_register: r,
+                    dwarf_id: Some(r.id.0),
+                    value: if r.register_has_role(probe_rs::RegisterRole::ProcessorStatus) {
+                        Some(probe_rs::RegisterValue::U32(0)) // TODO: The xpsr register is not captured, so default to 0 for now.
+                    } else {
+                        memory
+                            .register(Register(r.id.0))
+                            .ok()
+                            .map(|val| probe_rs::RegisterValue::U32(val))
+                    },
+                })
+                .collect(),
+        )
+    }
+
+    fn core_type() -> probe_rs::CoreType {
+        probe_rs::CoreType::Armv7em
+    }
+
+    fn instruction_set() -> probe_rs::InstructionSet {
+        probe_rs::InstructionSet::Thumb2
     }
 }

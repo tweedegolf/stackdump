@@ -2,6 +2,7 @@ use crate::{error::TraceError, type_value_tree::TypeValueTree, Frame, FrameType,
 use funty::Fundamental;
 use gimli::{DebugInfoOffset, EndianRcSlice, RunTimeEndian};
 use object::{Object, ObjectSection, ObjectSymbol, SectionKind};
+use probe_rs::{CoreType, MemoryInterface};
 use stackdump_core::{device_memory::DeviceMemory, memory_region::VecMemoryRegion};
 use std::collections::HashMap;
 
@@ -38,6 +39,10 @@ pub trait Platform<'data> {
         device_memory: &mut DeviceMemory<Self::Word>,
         previous_frame: Option<&mut Frame<Self::Word>>,
     ) -> Result<UnwindResult<Self::Word>, TraceError>;
+
+    fn get_registers(memory: &mut DeviceMemory<'_, Self::Word>) -> probe_rs_debug::DebugRegisters;
+    fn core_type() -> CoreType;
+    fn instruction_set() -> probe_rs::InstructionSet;
 }
 
 /// Create the stacktrace for the given platform.
@@ -306,4 +311,158 @@ where
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------
+
+/// Create the stacktrace for the given platform.
+///
+/// - device_memory: All the captured memory of the device.
+///   It is not necessary to include any data that is present in the elf file because that will automatically be added.
+///   It is required to have a decent chunk of the stack present. If not all of the stack is present,
+///   then eventually the tracing procedure will find a corrupt frame.
+///   The standard set of registers is also required to be present.
+/// - elf_data: The raw bytes of the elf file.
+///   This must be the exact same elf file as the one the device was running. Even a recompilation of the exact same code can change the debug info.
+pub fn trace2<'data, P: Platform<'data>>(
+    mut device_memory: DeviceMemory<P::Word>,
+    elf_data: &'data [u8],
+) -> Result<Vec<Frame<P::Word>>, TraceError>
+where
+    <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
+    let debug_info = probe_rs_debug::DebugInfo::from_raw(elf_data)?;
+
+    let initial_registers = P::get_registers(&mut device_memory);
+
+    let frames = debug_info.unwind(
+        &mut ProbeRsMemoryWrapper::<P>(&mut device_memory),
+        initial_registers,
+        probe_rs_debug::exception_handler_for_core(P::core_type()).as_ref(),
+        Some(P::instruction_set()),
+    )?;
+
+    Ok(frames
+        .into_iter()
+        .map(|prs_frame| Frame::<P::Word> {
+            function: prs_frame.function_name,
+            location: prs_frame
+                .source_location
+                .map(|l| Location {
+                    file: Some(l.path.to_string_lossy().into_owned()),
+                    line: l.line,
+                    column: l.column.map(|c| match c {
+                        probe_rs_debug::ColumnType::LeftEdge => 0,
+                        probe_rs_debug::ColumnType::Column(c) => c,
+                    }),
+                })
+                .unwrap_or_default(),
+            frame_type: if prs_frame.is_inlined {
+                FrameType::InlineFunction
+            } else {
+                FrameType::Function
+            },
+            variables: Vec::new(), // TODO
+        })
+        .collect())
+}
+
+struct ProbeRsMemoryWrapper<'a, 'data, 'memory, P: Platform<'data>>(
+    &'a mut DeviceMemory<'memory, P::Word>,
+)
+where
+    <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>;
+
+impl<'a, 'data, 'memory, P: Platform<'data>> MemoryInterface
+    for ProbeRsMemoryWrapper<'a, 'data, 'memory, P>
+where
+    <P::Word as funty::Numeric>::Bytes: bitvec::view::BitView<Store = u8>,
+{
+    fn supports_native_64bit_access(&mut self) -> bool {
+        true
+    }
+
+    fn read_64(&mut self, address: u64, data: &mut [u64]) -> Result<(), probe_rs::Error> {
+        let data_slice = unsafe {
+            std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), data.len() * size_of::<u64>())
+        };
+
+        let returned = self
+            .0
+            .read_slice(address..address + data_slice.len() as u64)
+            .map_err(|e| probe_rs::Error::Other(e.to_string()))?
+            .ok_or_else(|| probe_rs::Error::Other("Memory not captured".into()))?;
+
+        data_slice.copy_from_slice(&returned);
+
+        Ok(())
+    }
+
+    fn read_32(&mut self, address: u64, data: &mut [u32]) -> Result<(), probe_rs::Error> {
+        let data_slice = unsafe {
+            std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), data.len() * size_of::<u32>())
+        };
+
+        let data = self
+            .0
+            .read_slice(address..address + data_slice.len() as u64)
+            .map_err(|e| probe_rs::Error::Other(e.to_string()))?
+            .ok_or_else(|| probe_rs::Error::Other("Memory not captured".into()))?;
+
+        data_slice.copy_from_slice(&data);
+
+        Ok(())
+    }
+
+    fn read_16(&mut self, address: u64, data: &mut [u16]) -> Result<(), probe_rs::Error> {
+        let data_slice = unsafe {
+            std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), data.len() * size_of::<u16>())
+        };
+
+        let returned = self
+            .0
+            .read_slice(address..address + data_slice.len() as u64)
+            .map_err(|e| probe_rs::Error::Other(e.to_string()))?
+            .ok_or_else(|| probe_rs::Error::Other("Memory not captured".into()))?;
+
+        data_slice.copy_from_slice(&returned);
+
+        Ok(())
+    }
+
+    fn read_8(&mut self, address: u64, data: &mut [u8]) -> Result<(), probe_rs::Error> {
+        let returned = self
+            .0
+            .read_slice(address..address + data.len() as u64)
+            .map_err(|e| probe_rs::Error::Other(e.to_string()))?
+            .ok_or_else(|| probe_rs::Error::Other("Memory not captured".into()))?;
+
+        data.copy_from_slice(&returned);
+
+        Ok(())
+    }
+
+    fn write_64(&mut self, _address: u64, _data: &[u64]) -> Result<(), probe_rs::Error> {
+        unimplemented!()
+    }
+
+    fn write_32(&mut self, _address: u64, _data: &[u32]) -> Result<(), probe_rs::Error> {
+        unimplemented!()
+    }
+
+    fn write_16(&mut self, _address: u64, _data: &[u16]) -> Result<(), probe_rs::Error> {
+        unimplemented!()
+    }
+
+    fn write_8(&mut self, _address: u64, _data: &[u8]) -> Result<(), probe_rs::Error> {
+        unimplemented!()
+    }
+
+    fn supports_8bit_transfers(&self) -> Result<bool, probe_rs::Error> {
+        Ok(true)
+    }
+
+    fn flush(&mut self) -> Result<(), probe_rs::Error> {
+        Ok(())
+    }
 }

@@ -54,10 +54,18 @@ pub struct ArrayMemoryRegion<const SIZE: usize> {
 
 impl<const SIZE: usize> ArrayMemoryRegion<SIZE> {
     /// Creates a new memory region starting at the given address with the given data
-    pub fn new(start_address: u64, data: ArrayVec<u8, SIZE>) -> Self {
+    pub const fn new(start_address: u64, data: ArrayVec<u8, SIZE>) -> Self {
         Self {
             start_address,
             data,
+        }
+    }
+
+    /// Create a new empty memory region
+    pub const fn new_empty() -> Self {
+        Self {
+            start_address: 0,
+            data: arrayvec::ArrayVec::new_const(),
         }
     }
 

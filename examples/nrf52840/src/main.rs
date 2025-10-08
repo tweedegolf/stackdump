@@ -16,6 +16,15 @@ static mut CORE_REGISTERS: MaybeUninit<ArrayRegisterData<16, u32>> = MaybeUninit
 #[link_section = ".uninit"]
 static mut FPU_REGISTERS: MaybeUninit<ArrayRegisterData<32, u32>> = MaybeUninit::uninit();
 
+#[inline(never)]
+fn init_dump() {
+    unsafe {
+        STACKDUMP.write(ArrayMemoryRegion::new_empty());
+        CORE_REGISTERS.write(ArrayRegisterData::new_empty());
+        FPU_REGISTERS.write(ArrayRegisterData::new_empty());
+    }
+}
+
 const MESSAGES: [&'static str; 4] = [
     "I love you",
     "I hate you",
@@ -49,6 +58,8 @@ pub struct TransparentTest {
 fn main() -> ! {
     let _cp = cortex_m::Peripherals::take().unwrap();
     let dp = nrf52840_hal::pac::Peripherals::take().unwrap();
+
+    init_dump();
 
     let channels = rtt_init! {
         up: {
@@ -265,10 +276,10 @@ fn TIMER0() {
 
     unsafe {
         cortex_m::interrupt::free(|cs| {
-            let stack = &mut *STACKDUMP.as_mut_ptr();
-            let core_registers = &mut *CORE_REGISTERS.as_mut_ptr();
-            let fpu_registers = &mut *FPU_REGISTERS.as_mut_ptr();
-            stackdump_capture::cortex_m::capture(stack, core_registers, fpu_registers, cs);
+            let stack = STACKDUMP.assume_init_mut();
+            let core_registers = CORE_REGISTERS.assume_init_mut();
+            let fpu_registers = FPU_REGISTERS.assume_init_mut();
+            stackdump_capture::cortex_m::capture(stack, core_registers, fpu_registers);
 
             for byte in core_registers.bytes() {
                 DUMP_RTT_CHANNEL.as_mut().unwrap().write(&[byte]);

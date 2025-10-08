@@ -24,6 +24,8 @@ phf = { version = "0.12.1", features = ["macros"] }
 funty = { version = "2.0.0", default-features = false }
 strum = "0.27.2"
 strum_macros = "0.27.2"
+probe-rs-debug = "0.29.1"
+probe-rs = "0.29.1"
 
 [dev-dependencies]
 simple_logger = "5.0.0"

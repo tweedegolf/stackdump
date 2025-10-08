@@ -40,10 +40,18 @@ impl<const SIZE: usize, RB: funty::Integral> ArrayRegisterData<SIZE, RB> {
     ///
     /// - The registers must be sequential according to the dwarf register numbers.
     /// - All registers that are in the collection must have their true value.
-    pub fn new(starting_register: gimli::Register, registers: ArrayVec<RB, SIZE>) -> Self {
+    pub const fn new(starting_register: gimli::Register, registers: ArrayVec<RB, SIZE>) -> Self {
         Self {
             starting_register_number: starting_register.0,
             registers,
+        }
+    }
+
+    /// Create a new empty collection
+    pub const fn new_empty() -> Self {
+        Self {
+            starting_register_number: 0,
+            registers: ArrayVec::new_const(),
         }
     }
 
