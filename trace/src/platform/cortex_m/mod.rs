@@ -376,7 +376,7 @@ impl<'data> Platform<'data> for CortexMPlatform<'data> {
     }
 
     fn core_type() -> probe_rs::CoreType {
-        probe_rs::CoreType::Armv7em
+        probe_rs::CoreType::Armv8m
     }
 
     fn instruction_set() -> probe_rs::InstructionSet {
